@@ -5,8 +5,9 @@ let io;
 const initSocket = (server) => {
   io = new Server(server, {
     cors: {
-      origin: '*', // Adjust this in production to match your frontend URL
-      methods: ['GET', 'POST']
+      origin: ['https://socity.kiaantechnology.com', 'http://localhost:3000'],
+      methods: ['GET', 'POST'],
+      credentials: true
     }
   });
 
