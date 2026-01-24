@@ -132,6 +132,8 @@ model Society {
   staff       Staff[]
   moveRequests MoveRequest[]
   facilityRequests FacilityRequest[]
+
+  @@map("society")
 }
 
 model User {
@@ -189,6 +191,9 @@ model User {
   assignedIncidents Incident[] @relation("AssignedIncidents")
   patrolLogs        PatrolLog[] @relation("GuardPatrols")
   parkingPayments   ParkingPayment[]
+
+
+   @@map("user")
 }
 
 model RoleModel {
@@ -199,6 +204,8 @@ model RoleModel {
   users       User[]
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  @@map("rolemodel")
 }
 
 model Permission {
@@ -206,6 +213,8 @@ model Permission {
   label       String
   description String?
   roles       RolePermission[]
+
+  @@map("permission")
 }
 
 model RolePermission {
@@ -215,6 +224,8 @@ model RolePermission {
   permission   Permission @relation(fields: [permissionId], references: [id])
 
   @@id([roleId, permissionId])
+
+  @@map("rolepermission")
 }
 
 model UserSession {
@@ -226,6 +237,8 @@ model UserSession {
   lastActive  DateTime @default(now())
   token       String   @unique @db.VarChar(500)
   createdAt   DateTime @default(now())
+
+   @@map("usersession")
 }
 
 model Unit {
@@ -272,6 +285,8 @@ model Unit {
   updatedAt   DateTime @updatedAt
 
   @@unique([societyId, block, number])
+
+  @@map("unit")
 }
 
 model ParkingSlot {
@@ -296,6 +311,8 @@ model ParkingSlot {
   updatedAt   DateTime @updatedAt
   
   payments    ParkingPayment[]
+
+  @@map("parkingslot")
 }
 
 model ParkingPayment {
@@ -324,6 +341,8 @@ model ParkingPayment {
   updatedAt   DateTime @updatedAt
 
   @@unique([slotId, month, societyId])
+
+  @@map("parkingpayment")
 }
 
 model Complaint {
@@ -353,6 +372,9 @@ model Complaint {
   
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+
+   @@map("complaint")
 }
 
 model ComplaintComment {
@@ -363,6 +385,8 @@ model ComplaintComment {
   user        User      @relation(fields: [userId], references: [id])
   message     String    @db.Text
   createdAt   DateTime @default(now())
+
+  @@map("complaintcomment")
 }
 
 model Visitor {
@@ -391,6 +415,8 @@ model Visitor {
   
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+
+  @@map("visitor")
 }
 
 model Transaction {
@@ -416,6 +442,8 @@ model Transaction {
   
   bankAccountId Int?
   bankAccount   LedgerAccount? @relation(fields: [bankAccountId], references: [id])
+
+   @@map("transaction")
 }
 
 model Invoice {
@@ -442,6 +470,8 @@ model Invoice {
   
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  @@map("invoice") 
 }
 
 model Vendor {
@@ -474,6 +504,8 @@ model Vendor {
   purchaseOrders PurchaseOrder[]
   goodsReceipts GoodsReceipt[]
   createdAt   DateTime @default(now())
+
+   @@map("vendor")
 }
 
 
@@ -510,6 +542,8 @@ model VendorInvoice {
   updatedAt     DateTime @updatedAt
 
   @@unique([societyId, invoiceNumber, vendorId])
+
+  @@map("vendorinvoice")
 }
 
 model VendorPayout {
@@ -528,6 +562,8 @@ model VendorPayout {
   
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
+
+  @@map("vendorpayout") 
 }
 
 
@@ -542,6 +578,8 @@ model EmergencyLog {
   reason       String?  @db.Text
   barcodeId    String
   societyId    Int?
+
+  @@map("emergencylog")
 }
 
 model EmergencyBarcode {
@@ -555,6 +593,8 @@ model EmergencyBarcode {
   qrCodeUrl    String
   createdAt    DateTime @default(now())
   societyId    Int?
+
+   @@map("emergencybarcode")
 }
 
 model EmergencyAlert {
@@ -573,6 +613,8 @@ model EmergencyAlert {
   
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+
+   @@map("emergencyalert")
 }
 
 model EmergencyContact {
@@ -590,6 +632,8 @@ model EmergencyContact {
   
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+
+  @@map("emergencycontact")
 }
 
 
@@ -605,6 +649,8 @@ model Notice {
   
   createdAt   DateTime @default(now())
   expiresAt   DateTime?
+
+  @@map("notice")
 }
 
 model Amenity {
@@ -625,6 +671,8 @@ model Amenity {
   
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  @@map("amenity")
 }
 
 model AmenityBooking {
@@ -644,12 +692,16 @@ model AmenityBooking {
   
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  @@map("amenitybooking")
 }
 
 model SystemSetting {
   id    Int    @id @default(autoincrement())
   key   String @unique
   value String @db.Text
+
+  @@map("systemsetting") 
 }
 
 model BillingPlan {
@@ -661,6 +713,8 @@ model BillingPlan {
   status      String   @default("active") // active, inactive
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+   @@map("billingplan")
 }
 
 model PlatformInvoice {
@@ -676,6 +730,8 @@ model PlatformInvoice {
   
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+
+   @@map("platforminvoice")
 }
 
 
@@ -700,6 +756,8 @@ model CommunityBuzz {
   createdAt   DateTime @default(now())
   
   likedBy     BuzzLike[]
+
+  @@map("communitybuzz") 
 }
 
 model CommunityComment {
@@ -710,6 +768,8 @@ model CommunityComment {
   author      User          @relation(fields: [authorId], references: [id])
   content     String        @db.Text
   createdAt   DateTime      @default(now())
+
+   @@map("communitycomment") 
 }
 
 model BuzzLike {
@@ -721,6 +781,8 @@ model BuzzLike {
   createdAt DateTime @default(now())
 
   @@unique([buzzId, userId])
+
+  @@map("buzzlike")
 }
 
 model UnitMember {
@@ -735,6 +797,8 @@ model UnitMember {
   email     String?
   profileImg String?
   createdAt DateTime @default(now())
+
+  @@map("unitmember")
 }
 
 model UnitVehicle {
@@ -758,6 +822,8 @@ model UnitVehicle {
   
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+   @@map("unitvehicle") 
 }
 
 model UnitPet {
@@ -770,6 +836,8 @@ model UnitPet {
   vaccinationStatus String @default("UP_TO_DATE")
   lastVaccinationDate DateTime?
   createdAt DateTime @default(now())
+
+  @@map("unitpet")
 }
 
 model SOSAlert {
@@ -783,6 +851,8 @@ model SOSAlert {
   location    String?
   createdAt   DateTime @default(now())
   resolvedAt  DateTime?
+
+  @@map("sosalert")
 }
 
 
@@ -809,6 +879,8 @@ model MarketplaceItem {
   
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+   @@map("marketplaceitem") 
 }
 
 // ==================== NEW ADMIN MODELS ====================
@@ -824,6 +896,8 @@ model Meeting {
   status      String   @default("SCHEDULED") // SCHEDULED, COMPLETED, CANCELLED
   societyId   Int
   society     Society  @relation(fields: [societyId], references: [id])
+
+   @@map("meeting")
 }
 model CommunityGuideline {
   id          Int      @id @default(autoincrement())
@@ -834,6 +908,8 @@ model CommunityGuideline {
   category    String   // SOCIETY, SECURITY, AMENITIES
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  @@map("communityguideline")
 }
 
 model Asset {
@@ -847,6 +923,8 @@ model Asset {
   society      Society  @relation(fields: [societyId], references: [id])
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+
+  @@map("asset")
 }
 
 model Document {
@@ -860,6 +938,8 @@ model Document {
   size       String?
   type       String?
   createdAt DateTime @default(now())
+
+  @@map("document") 
 }
 
 model Parcel {
@@ -876,6 +956,8 @@ model Parcel {
   societyId     Int
   society       Society   @relation(fields: [societyId], references: [id])
   createdAt     DateTime  @default(now())
+
+   @@map("parcel")
 }
 
 model Event {
@@ -898,6 +980,8 @@ model Event {
   
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  @@map("event") 
 }
 
 model EventRsvp {
@@ -911,6 +995,8 @@ model EventRsvp {
   updatedAt DateTime @updatedAt
 
   @@unique([eventId, userId])
+
+  @@map("eventrsvp")
 }
 model PurchaseRequest {
   id           Int      @id @default(autoincrement())
@@ -944,6 +1030,8 @@ model PurchaseRequest {
 
   @@unique([societyId, prNumber])
   purchaseOrder PurchaseOrder?
+
+  @@map("purchaserequest") 
 }
 model Conversation {
   id          Int      @id @default(autoincrement())
@@ -959,6 +1047,8 @@ model Conversation {
   updatedAt   DateTime @updatedAt
 
   @@unique([societyId, type, participantId])
+
+  @@map("conversation")
 }
 
 model ChatMessage {
@@ -975,6 +1065,8 @@ model ChatMessage {
   
   createdAt      DateTime @default(now())
 
+  @@map("chatmessage")
+
 }
 model ServiceCategory {
   id          String   @id
@@ -987,6 +1079,8 @@ model ServiceCategory {
   inquiries   ServiceInquiry[]
   
   createdAt   DateTime @default(now())
+
+  @@map("servicecategory")
 }
 
 model ServiceVariant {
@@ -997,6 +1091,8 @@ model ServiceVariant {
   price       Float?
   
   createdAt   DateTime @default(now())
+
+   @@map("servicevariant")
 }
 
 model ServiceInquiry {
@@ -1022,6 +1118,8 @@ model ServiceInquiry {
   
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+
+   @@map("serviceinquiry")
 }
 
 model LedgerAccount {
@@ -1044,6 +1142,8 @@ model LedgerAccount {
   transactions Transaction[]
   
   bankDetails Json?    // { ifsc, accountNo, branch }
+
+   @@map("ledgeraccount")
 }
 
 model JournalEntry {
@@ -1064,6 +1164,8 @@ model JournalEntry {
   updatedAt   DateTime @updatedAt
 
   @@unique([societyId, voucherNo])
+
+  @@map("journalentry")
 }
 
 model JournalLine {
@@ -1076,6 +1178,8 @@ model JournalLine {
   
   debit          Float         @default(0)
   credit         Float         @default(0)
+
+   @@map("journalline")
 }
 
 model PurchaseOrder {
@@ -1113,6 +1217,8 @@ model PurchaseOrder {
 
   @@unique([societyId, poNumber])
   goodsReceipts GoodsReceipt[]
+
+  @@map("purchaseorder")
 }
 
 model GoodsReceipt {
@@ -1148,6 +1254,8 @@ model GoodsReceipt {
   updatedAt DateTime @updatedAt
 
   @@unique([societyId, grNumber])
+
+   @@map("goodsreceipt")
 }
 
 model Incident {
@@ -1171,6 +1279,8 @@ model Incident {
   
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  @@map("incident")
 }
 
 model PatrolLog {
@@ -1190,6 +1300,8 @@ model PatrolLog {
   
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  @@map("patrollog")
 }
 
 model Staff {
@@ -1222,6 +1334,8 @@ model Staff {
   
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@map("staff") 
 }
 
 enum MoveRequestType {
@@ -1273,6 +1387,8 @@ model MoveRequest {
   
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
+
+  @@map("moverequest")
 }
 
 model FacilityRequest {
@@ -1295,4 +1411,6 @@ model FacilityRequest {
   
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+   @@map("facilityrequest") 
 }
