@@ -47,7 +47,12 @@ const server = http.createServer(app);
 // Initialize Socket.io
 initSocket(server);
 
-app.use(cors());
+app.use(cors({
+  origin: ['https://socity.kiaantechnology.com', 'http://localhost:3000'],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 app.use(express.json({ limit: '50mb' })); // Increased limit for image uploads
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
