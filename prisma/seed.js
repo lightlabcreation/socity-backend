@@ -24,7 +24,7 @@ async function main() {
     { email: 'resident2@society.com', password: 'resident123', name: 'Jane Smith', role: 'RESIDENT' },
     { email: 'guard@society.com', password: 'guard123', name: 'Security Guard', role: 'GUARD' },
     { email: 'vendor@society.com', password: 'vendor123', name: 'PestFree Services', role: 'VENDOR' },
-    { email: 'accountant@society.com', password: 'password123', name: 'Finance Mgr', role: 'ACCOUNTANT' },
+    { email: 'individual@example.com', password: 'user123', name: 'Individual User', role: 'INDIVIDUAL' },
   ]
 
   for (const userData of users) {
