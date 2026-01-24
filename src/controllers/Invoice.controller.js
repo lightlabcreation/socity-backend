@@ -202,8 +202,12 @@ class InvoiceController {
             const { invoiceNo } = req.params;
             const { paymentMode } = req.body;
 
+            // Determine if invoiceNo is an ID or a reference string
+            const isNumericId = /^\d+$/.test(invoiceNo);
+            const whereClause = isNumericId ? { id: parseInt(invoiceNo) } : { invoiceNo };
+
             const invoice = await prisma.invoice.update({
-                where: { invoiceNo },
+                where: whereClause,
                 data: {
                     status: 'PAID',
                     paidDate: new Date(),

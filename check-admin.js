@@ -1,12 +1,21 @@
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
-async function main() {
-  const user = await prisma.user.findFirst({
-    where: { email: 'admin@society.com' },
-    include: { society: true }
-  });
-  console.log('Admin User:', JSON.stringify(user, null, 2));
+async function checkAdmin() {
+  try {
+    const admin = await prisma.user.findUnique({
+      where: { email: 'superadmin@society.com' }
+    });
+    console.log('--- Super Admin Info ---');
+    console.log('Name:', admin.name);
+    console.log('Role:', admin.role);
+    console.log('SocietyID:', admin.societyId);
+    console.log('------------------------');
+  } catch (error) {
+    console.error('Error checking admin:', error);
+  } finally {
+    await prisma.$disconnect();
+  }
 }
 
-main().catch(err => console.error(err)).finally(() => prisma.$disconnect());
+checkAdmin();

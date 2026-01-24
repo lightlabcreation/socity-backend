@@ -116,12 +116,24 @@ class VendorController {
   static async getStats(req, res) {
     try {
       const societyId = req.user.societyId;
-      const where = societyId ? { societyId } : {};
+      const role = req.user.role;
+      // Super Admin should see global stats, others filtered by their society
+      const where = role === 'SUPER_ADMIN' ? {} : (societyId ? { societyId } : {});
 
       const totalVendors = await prisma.vendor.count({ where });
       const activeVendors = await prisma.vendor.count({
         where: { ...where, status: 'ACTIVE' }
       });
+
+      // Count unique societies served by these vendors
+      const societyConnectionsData = await prisma.vendor.groupBy({
+        by: ['societyId'],
+        where: {
+          ...where,
+          societyId: { not: null }
+        }
+      });
+      const societyConnections = societyConnectionsData.length;
 
       // Calculate pending payments from vendor invoices
       const pendingPayments = await prisma.vendorInvoice.aggregate({
@@ -132,6 +144,7 @@ class VendorController {
       res.json({
         totalVendors,
         activeVendors,
+        societyConnections,
         pendingPayments: pendingPayments._sum.totalAmount || 0,
         avgPartnerRating: 4.8 // Mock rating
       });
