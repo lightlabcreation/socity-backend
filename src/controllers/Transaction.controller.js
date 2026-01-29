@@ -171,7 +171,9 @@ class TransactionController {
       // Check if transaction exists and belongs to society
       const existing = await prisma.transaction.findUnique({ where: { id: parseInt(id) } });
       if (!existing) return res.status(404).json({ error: 'Transaction not found' });
-      if (existing.societyId !== req.user.societyId) return res.status(403).json({ error: 'Unauthorized' });
+      if (req.user.role !== 'SUPER_ADMIN' && existing.societyId !== req.user.societyId) {
+        return res.status(403).json({ error: 'Access denied: transaction belongs to another society' });
+      }
 
       // Update
       const updated = await prisma.transaction.update({
@@ -194,7 +196,9 @@ class TransactionController {
       
       const existing = await prisma.transaction.findUnique({ where: { id: parseInt(id) } });
       if (!existing) return res.status(404).json({ error: 'Transaction not found' });
-      if (existing.societyId !== req.user.societyId) return res.status(403).json({ error: 'Unauthorized' });
+      if (req.user.role !== 'SUPER_ADMIN' && existing.societyId !== req.user.societyId) {
+        return res.status(403).json({ error: 'Access denied: transaction belongs to another society' });
+      }
 
       await prisma.transaction.delete({ where: { id: parseInt(id) } });
       res.json({ message: 'Transaction deleted' });

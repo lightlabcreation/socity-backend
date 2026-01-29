@@ -3,8 +3,10 @@ const prisma = require('../lib/prisma');
 class SocietyController {
   static async getUnits(req, res) {
     try {
+      const societyId = req.user.societyId;
+      if (!societyId) return res.json([]);
       const units = await prisma.unit.findMany({
-        where: { societyId: req.user.societyId },
+        where: { societyId },
         include: { owner: true, tenant: true }
       });
       res.json(units);
@@ -17,6 +19,11 @@ class SocietyController {
     try {
       const { id } = req.params;
       const { ownerId, tenantId } = req.body;
+      const existing = await prisma.unit.findUnique({ where: { id: parseInt(id) } });
+      if (!existing) return res.status(404).json({ error: 'Unit not found' });
+      if (req.user.role !== 'SUPER_ADMIN' && existing.societyId !== req.user.societyId) {
+        return res.status(403).json({ error: 'Access denied: unit belongs to another society' });
+      }
       const unit = await prisma.unit.update({
         where: { id: parseInt(id) },
         data: { ownerId, tenantId }
@@ -122,7 +129,7 @@ class SocietyController {
 
   static async addMember(req, res) {
     try {
-      const { name, email, phone, role, unitId, status } = req.body;
+      const { name, email, phone, role, unitId, status, password: plainPassword } = req.body;
       const societyId = req.user.societyId;
       const bcrypt = require('bcryptjs');
 
@@ -134,14 +141,16 @@ class SocietyController {
 
       const result = await prisma.$transaction(async (tx) => {
         // 1. Create User
-        // Map 'owner'/'tenant' to 'RESIDENT' for role enum compliance if needed, 
-        // OR use the role as is if we update the enum. 
-        // For now, let's keep it flexible but ensure it's a valid enum value.
         const validRoles = ['RESIDENT', 'ADMIN', 'SUPER_ADMIN', 'GUARD', 'VENDOR', 'ACCOUNTANT'];
         let userRole = role?.toUpperCase() || 'RESIDENT';
         if (!validRoles.includes(userRole)) {
-          userRole = 'RESIDENT'; // Default to RESIDENT if it's 'OWNER' or 'TENANT' which are relations
+          userRole = 'RESIDENT';
         }
+
+        const passwordToUse = (typeof plainPassword === 'string' && plainPassword.trim().length >= 6)
+          ? plainPassword.trim()
+          : 'password123';
+        const hashedPassword = await bcrypt.hash(passwordToUse, 10);
 
         const user = await tx.user.create({
           data: {
@@ -150,7 +159,7 @@ class SocietyController {
             phone,
             role: userRole,
             status: status?.toUpperCase() || 'ACTIVE',
-            password: await bcrypt.hash('password123', 10), // Default password
+            password: hashedPassword,
             societyId
           }
         });
@@ -173,6 +182,43 @@ class SocietyController {
       res.status(201).json(result);
     } catch (error) {
       console.error('Add Member Error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  }
+
+  static async removeMember(req, res) {
+    try {
+      const { id } = req.params;
+      const memberId = parseInt(id);
+      const societyId = req.user.societyId;
+
+      const member = await prisma.user.findUnique({ where: { id: memberId } });
+      if (!member) {
+        return res.status(404).json({ error: 'Member not found' });
+      }
+      if (member.societyId !== societyId) {
+        return res.status(403).json({ error: 'You can only remove members of your society' });
+      }
+      if (member.role !== 'RESIDENT') {
+        return res.status(403).json({ error: 'Only residents can be removed from this screen' });
+      }
+
+      await prisma.$transaction(async (tx) => {
+        await tx.userSession.deleteMany({ where: { userId: memberId } });
+        await tx.unit.updateMany({
+          where: { OR: [{ ownerId: memberId }, { tenantId: memberId }] },
+          data: {
+            ownerId: null,
+            tenantId: null,
+            status: 'VACANT'
+          }
+        });
+        await tx.user.delete({ where: { id: memberId } });
+      });
+
+      res.json({ message: 'Resident removed successfully' });
+    } catch (error) {
+      console.error('Remove Member Error:', error);
       res.status(500).json({ error: error.message });
     }
   }
@@ -238,6 +284,7 @@ class SocietyController {
         pincode,
         units,
         plan,
+        billingPlanId,
         adminName,
         adminEmail,
         adminPassword,
@@ -250,6 +297,11 @@ class SocietyController {
       const bcrypt = require('bcryptjs');
       const hashedPassword = adminPassword ? await bcrypt.hash(adminPassword, 10) : null;
 
+      let subscriptionPlan = (plan && typeof plan === 'string') ? plan.toUpperCase() : 'BASIC';
+      if (!['BASIC', 'PROFESSIONAL', 'ENTERPRISE'].includes(subscriptionPlan)) {
+        subscriptionPlan = 'BASIC';
+      }
+
       const data = {
         name,
         address,
@@ -258,9 +310,22 @@ class SocietyController {
         pincode,
         code,
         status: 'PENDING',
-        subscriptionPlan: plan.toUpperCase(),
+        subscriptionPlan,
         expectedUnits: parseInt(units) || 0,
       };
+
+      if (billingPlanId != null && billingPlanId !== '') {
+        const billingPlan = await prisma.billingPlan.findUnique({
+          where: { id: parseInt(billingPlanId) }
+        });
+        if (billingPlan && billingPlan.status === 'active') {
+          data.billingPlanId = billingPlan.id;
+          const nameUpper = (billingPlan.name || '').toUpperCase();
+          if (nameUpper === 'BASIC' || nameUpper === 'PROFESSIONAL' || nameUpper === 'ENTERPRISE') {
+            data.subscriptionPlan = nameUpper;
+          }
+        }
+      }
 
       if (adminEmail && adminName) {
         data.users = {
@@ -399,12 +464,19 @@ class SocietyController {
 
   /**
    * Get Admin Dashboard Statistics
-   * Aggregated data for the main Admin Dashboard overview
+   * Aggregated data for the main Admin Dashboard overview.
+   * Only for society-scoped users (ADMIN/COMMITTEE). SUPER_ADMIN must use super-admin dashboard.
    */
   static async getAdminDashboardStats(req, res) {
     try {
-      const societyId = req.user.societyId;
+      const societyId = req.user.societyId ?? (req.query.societyId ? parseInt(req.query.societyId) : null);
+      if (!societyId) {
+        return res.status(400).json({ error: 'Society context required. This dashboard is for society admins only.' });
+      }
       const society = await prisma.society.findUnique({ where: { id: societyId } });
+      if (!society && req.user.role !== 'SUPER_ADMIN') {
+        return res.status(403).json({ error: 'Society not found or access denied' });
+      }
 
       // ========== USER COUNTS ==========
       const [totalUsers, activeUsers, inactiveUsers, pendingUsers, owners, tenants, staff, totalResidentUsers, totalFamilyMembers] = await Promise.all([
@@ -656,8 +728,21 @@ class SocietyController {
   static async getGuidelines(req, res) {
     try {
       const { societyId } = req.query;
-      const where = societyId ? { societyId: parseInt(societyId) } : {};
-
+      
+      // If societyId is provided, fetch specific + global.
+      // If not provided (Super Admin view all), fetch all (or we could default to global only, but usually Super Admin wants all).
+      // However, for Society Admin (who sends their ID), we want THEIR guidelines + GLOBAL guidelines.
+      
+      let where = {};
+      if (societyId) {
+          where = {
+            OR: [
+                { societyId: parseInt(societyId) },
+                { societyId: null }
+            ]
+          };
+      }
+      
       const guidelines = await prisma.communityGuideline.findMany({
         where,
         include: {
@@ -674,20 +759,77 @@ class SocietyController {
     }
   }
 
+  static async getGuidelinesForMe(req, res) {
+    try {
+      const user = req.user;
+      if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+      const role = (user.role || '').toUpperCase();
+      const societyId = user.societyId ? parseInt(user.societyId) : null;
+
+      const audienceForRole = {
+        ADMIN: ['ALL', 'ADMINS'],
+        RESIDENT: ['ALL', 'RESIDENTS'],
+        INDIVIDUAL: ['ALL', 'INDIVIDUALS'],
+        VENDOR: ['ALL', 'VENDORS'],
+        SUPER_ADMIN: ['ALL', 'ADMINS', 'RESIDENTS', 'INDIVIDUALS', 'VENDORS'],
+      };
+      const allowedAudiences = audienceForRole[role] || ['ALL'];
+
+      // Include null targetAudience (legacy rows) as "ALL"
+      const audienceOrNull = [...allowedAudiences.map((a) => ({ targetAudience: a })), { targetAudience: null }];
+
+      let where = { OR: audienceOrNull };
+
+      if (role === 'ADMIN' || role === 'RESIDENT') {
+        where = {
+          AND: [
+            { OR: societyId != null ? [{ societyId }, { societyId: null }] : [{ societyId: null }] },
+            { OR: audienceOrNull }
+          ]
+        };
+      } else if (role === 'INDIVIDUAL') {
+        where = {
+          AND: [
+            { societyId: null },
+            { OR: audienceOrNull }
+          ]
+        };
+      }
+      // VENDOR, SUPER_ADMIN: any society or global, filtered by audience
+
+      const guidelines = await prisma.communityGuideline.findMany({
+        where,
+        include: {
+          society: { select: { id: true, name: true } }
+        },
+        orderBy: { createdAt: 'desc' }
+      });
+
+      res.json(guidelines);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  }
+
   static async createGuideline(req, res) {
     try {
-      const { societyId, title, content, category } = req.body;
+      const { societyId, title, content, category, targetAudience } = req.body;
 
-      if (!societyId || !title || !content || !category) {
+      // Allow null societyId for global guidelines (only if Super Admin presumably, but enforcing data validity here)
+      // If societyId is NOT provided or is null, it's global.
+      if (!title || !content || !category) {
         return res.status(400).json({ error: 'Missing required fields' });
       }
 
+      const audience = (targetAudience || 'ALL').toUpperCase();
       const guideline = await prisma.communityGuideline.create({
         data: {
-          societyId: parseInt(societyId),
+          societyId: societyId ? parseInt(societyId) : null,
           title,
           content,
-          category: category.toUpperCase()
+          category: category.toUpperCase(),
+          targetAudience: ['ALL', 'RESIDENTS', 'ADMINS', 'INDIVIDUALS', 'VENDORS'].includes(audience) ? audience : 'ALL'
         },
         include: {
           society: {
@@ -705,15 +847,17 @@ class SocietyController {
   static async updateGuideline(req, res) {
     try {
       const { id } = req.params;
-      const { title, content, category } = req.body;
+      const { title, content, category, targetAudience } = req.body;
+
+      const data = { title, content, category: (category || '').toUpperCase() };
+      if (targetAudience != null) {
+        const a = (targetAudience || 'ALL').toUpperCase();
+        data.targetAudience = ['ALL', 'RESIDENTS', 'ADMINS', 'INDIVIDUALS', 'VENDORS'].includes(a) ? a : 'ALL';
+      }
 
       const guideline = await prisma.communityGuideline.update({
         where: { id: parseInt(id) },
-        data: {
-          title,
-          content,
-          category: category.toUpperCase()
-        },
+        data,
         include: {
           society: {
             select: { id: true, name: true }

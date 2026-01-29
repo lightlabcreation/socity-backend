@@ -19,11 +19,10 @@ const getAll = async (req, res) => {
 const getById = async (req, res) => {
   try {
     const { id } = req.params;
-    const meeting = await prisma.meeting.findUnique({
-      where: { id: parseInt(id) }
-    });
-    if (!meeting) {
-      return res.status(404).json({ success: false, message: 'Meeting not found' });
+    const meeting = await prisma.meeting.findUnique({ where: { id: parseInt(id) } });
+    if (!meeting) return res.status(404).json({ success: false, message: 'Meeting not found' });
+    if (req.user.role !== 'SUPER_ADMIN' && meeting.societyId !== req.user.societyId) {
+      return res.status(403).json({ success: false, message: 'Access denied: meeting belongs to another society' });
     }
     res.json({ success: true, data: meeting });
   } catch (error) {
@@ -58,8 +57,12 @@ const create = async (req, res) => {
 const update = async (req, res) => {
   try {
     const { id } = req.params;
+    const existing = await prisma.meeting.findUnique({ where: { id: parseInt(id) } });
+    if (!existing) return res.status(404).json({ success: false, message: 'Meeting not found' });
+    if (req.user.role !== 'SUPER_ADMIN' && existing.societyId !== req.user.societyId) {
+      return res.status(403).json({ success: false, message: 'Access denied: meeting belongs to another society' });
+    }
     const { title, description, date, time, location, attendees, status } = req.body;
-    
     const meeting = await prisma.meeting.update({
       where: { id: parseInt(id) },
       data: {
@@ -82,9 +85,12 @@ const update = async (req, res) => {
 const remove = async (req, res) => {
   try {
     const { id } = req.params;
-    await prisma.meeting.delete({
-      where: { id: parseInt(id) }
-    });
+    const existing = await prisma.meeting.findUnique({ where: { id: parseInt(id) } });
+    if (!existing) return res.status(404).json({ success: false, message: 'Meeting not found' });
+    if (req.user.role !== 'SUPER_ADMIN' && existing.societyId !== req.user.societyId) {
+      return res.status(403).json({ success: false, message: 'Access denied: meeting belongs to another society' });
+    }
+    await prisma.meeting.delete({ where: { id: parseInt(id) } });
     res.json({ success: true, message: 'Meeting deleted' });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

@@ -192,7 +192,13 @@ class UserController {
 
   static async getAllUsers(req, res) {
     try {
+      // SUPER_ADMIN sees all. ADMIN/COMMITTEE see same-society users + SUPER_ADMIN (so they can chat with platform)
+      const isSocietyScope = ['ADMIN', 'COMMITTEE'].includes(req.user.role) && req.user.societyId;
+      const where = isSocietyScope
+        ? { OR: [{ societyId: req.user.societyId }, { role: 'SUPER_ADMIN' }] }
+        : {};
       const users = await prisma.user.findMany({
+        where,
         include: { society: true },
         orderBy: { createdAt: 'desc' }
       });
@@ -439,8 +445,9 @@ class UserController {
         where: { id: parseInt(id) }
       });
 
-      if (!user) {
-        return res.status(404).json({ error: 'User not found' });
+      if (!user) return res.status(404).json({ error: 'User not found' });
+      if (req.user.role !== 'SUPER_ADMIN' && user.societyId !== req.user.societyId && user.id !== req.user.id) {
+        return res.status(403).json({ error: 'Access denied: can only view activity for same society or self' });
       }
 
       const activityData = {

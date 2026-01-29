@@ -566,6 +566,28 @@ async function main() {
     });
   }
 
+  // System Settings (super-admin) – defaults so System Settings page shows backend data
+  const defaultSettings = [
+    { key: 'platformName', value: 'Societly Platform' },
+    { key: 'supportEmail', value: 'support@societly.com' },
+    { key: 'maintenanceMode', value: 'false' },
+    { key: 'newRegistrations', value: 'true' },
+    { key: 'emailNotifications', value: 'true' },
+    { key: 'smsNotifications', value: 'true' },
+    { key: 'pushNotifications', value: 'true' },
+    { key: 'twoFactorRequired', value: 'false' },
+    { key: 'sessionTimeout', value: '30' },
+    { key: 'maxLoginAttempts', value: '5' }
+  ]
+  for (const s of defaultSettings) {
+    await prisma.systemSetting.upsert({
+      where: { key: s.key },
+      update: {},
+      create: s
+    })
+  }
+  console.log('System settings seeded')
+
   console.log('Seeding completed');
 }
 

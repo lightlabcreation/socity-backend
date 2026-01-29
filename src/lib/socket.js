@@ -30,6 +30,13 @@ const initSocket = (server) => {
       console.log(`Socket ${socket.id} joined conversation_${conversationId}`);
     });
 
+    socket.on('join-user', (userId) => {
+      if (userId) {
+        socket.join(`user_${userId}`);
+        console.log(`Socket ${socket.id} joined user_${userId}`);
+      }
+    });
+
     socket.on('disconnect', () => {
       console.log('User disconnected:', socket.id);
     });

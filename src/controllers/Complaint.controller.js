@@ -23,8 +23,16 @@ class ComplaintController {
           { reportedById: req.user.id }
         ];
       } else if (req.user.role === 'SUPER_ADMIN') {
-        // Super Admins only see public tickets (unless specifically assigned, but usually they don't handle local tickets)
-        where.isPrivate = false;
+        // Super Admins see public tickets OR admin-escalated complaints
+        where.OR = [
+          { isPrivate: false },
+          { escalatedToSuperAdmin: true }
+        ];
+      } else if (req.user.role === 'VENDOR') {
+        const vendor = await prisma.vendor.findFirst({ where: { email: req.user.email } });
+        if (vendor) {
+            where.vendorId = vendor.id;
+        }
       }
 
       if (status) where.status = status;
@@ -56,6 +64,7 @@ class ComplaintController {
             },
             assignedTo: { select: { name: true } },
             society: { select: { name: true } },
+            vendor: { select: { name: true } },
             comments: { select: { id: true } }
           },
           orderBy: { createdAt: 'desc' }
@@ -94,17 +103,49 @@ class ComplaintController {
 
   static async create(req, res) {
     try {
-      const { title, description, category, priority, images, isPrivate } = req.body;
+      const { title, description, category, priority, isPrivate, images, vendorId } = req.body;
+      let finalVendorId = vendorId != null ? parseInt(vendorId, 10) : null;
+
+      // Smart Routing: Auto-assign to vendor if not explicitly selected
+      if (!finalVendorId && category) {
+        const categoryMap = {
+          'cleaning': ['Housekeeping', 'Cleaning', 'Maid', 'House Keeping'],
+          'security': ['Security', 'Guard', 'Security Guard'],
+          'pest': ['Pest Control', 'Pest'],
+          'plumbing': ['Plumber', 'Plumbing'],
+          'electric': ['Electrician', 'Electrical'],
+          'internet': ['Internet', 'Broadband', 'Wifi']
+        };
+
+        const targetServiceTypes = categoryMap[category.toLowerCase()] || [category];
+        
+        // Find an active vendor in this society matching the service type
+        const vendor = await prisma.vendor.findFirst({
+          where: {
+            societyId: req.user.societyId,
+            status: 'ACTIVE',
+            serviceType: { in: targetServiceTypes } // Prisma 'in' filter
+          }
+        });
+
+        if (vendor) {
+            finalVendorId = vendor.id;
+        }
+      }
+
+      const isAdminEscalation = (req.user.role === 'ADMIN' || req.user.role === 'COMMITTEE') && !finalVendorId;
       const complaint = await prisma.complaint.create({
         data: {
           title,
           description,
           category,
           priority: priority || 'MEDIUM',
-          isPrivate: isPrivate || false,
-          images,
+          isPrivate: isAdminEscalation ? true : (isPrivate || false),
+          escalatedToSuperAdmin: isAdminEscalation,
+          images: images || undefined,
           societyId: req.user.societyId,
-          reportedById: req.user.id
+          reportedById: req.user.id,
+          vendorId: isAdminEscalation ? null : finalVendorId
         }
       });
       res.status(201).json(complaint);
@@ -176,6 +217,34 @@ class ComplaintController {
         }
       });
       res.status(201).json(comment);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  }
+
+  /** Admin-only: raise a complaint against a specific vendor (separate from "escalate to Super Admin"). */
+  static async createAgainstVendor(req, res) {
+    try {
+      const { vendorId, title, description, category, priority, isPrivate, images } = req.body;
+      const vId = vendorId != null ? parseInt(vendorId, 10) : null;
+      if (!vId || !title || !description || !category) {
+        return res.status(400).json({ error: 'vendorId, title, description and category are required' });
+      }
+      const complaint = await prisma.complaint.create({
+        data: {
+          title,
+          description,
+          category,
+          priority: priority || 'MEDIUM',
+          isPrivate: isPrivate ?? false,
+          escalatedToSuperAdmin: false,
+          images: images || undefined,
+          societyId: req.user.societyId,
+          reportedById: req.user.id,
+          vendorId: vId
+        }
+      });
+      res.status(201).json(complaint);
     } catch (error) {
       res.status(500).json({ error: error.message });
     }

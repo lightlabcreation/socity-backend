@@ -56,7 +56,15 @@ app.use(cors({
 app.use(express.json({ limit: '50mb' })); // Increased limit for image uploads
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
+// Debug logging
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} ${req.method} ${req.url}`);
+  console.log('Query:', req.query);
+  next();
+});
+
 const chatRoutes = require('./routes/chat.routes');
+const notificationRoutes = require('./routes/notification.routes');
 
 // Routes
 app.use('/api/auth', authRoutes);
@@ -79,6 +87,7 @@ app.use('/api/vendor-payouts', vendorPayoutRoutes);
 app.use('/api/roles', roleRoutes);
 app.use('/api/sessions', sessionRoutes);
 app.use('/api/chat', chatRoutes);
+app.use('/api/notifications', notificationRoutes);
 app.use('/api/ledger', require('./routes/ledger.routes'));
 app.use('/api/journal', require('./routes/journal.routes'));
 app.use('/api/banks', require('./routes/bank.routes'));
@@ -103,6 +112,24 @@ app.use('/api/invoices', invoiceRoutes);
 app.use('/api/incidents', require('./routes/incident.routes'));
 app.use('/api/patrolling', require('./routes/patrolling.routes'));
 app.use('/api/guard', require('./routes/guard.routes'));
+
+const fs = require('fs');
+const path = require('path');
+
+// Global Error Handler
+app.use((err, req, res, next) => {
+  console.error('Global Error Handler Caught:', err);
+  
+  try {
+    const log = `[${new Date().toISOString()}] Error: ${err.message}\nStack: ${err.stack}\n\n`;
+    fs.appendFileSync(path.join(__dirname, '../crash.log'), log);
+  } catch (e) {
+    console.error('Failed to write to crash log', e);
+  }
+
+  if (err.stack) console.error(err.stack);
+  res.status(500).json({ error: err.message, stack: err.stack });
+});
 
 const PORT = process.env.PORT || 9000;
 

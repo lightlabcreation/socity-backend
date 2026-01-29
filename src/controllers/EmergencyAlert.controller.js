@@ -65,6 +65,37 @@ class EmergencyAlertController {
         console.warn('Socket emit failed:', err.message);
       }
 
+      // Create in-app Notification for all Super Admins and society admins so they see it in bell
+      try {
+        const superAdmins = await prisma.user.findMany({
+          where: { role: 'SUPER_ADMIN' },
+          select: { id: true }
+        });
+        const societyAdmins = await prisma.user.findMany({
+          where: { societyId, role: { in: ['ADMIN', 'COMMITTEE'] } },
+          select: { id: true }
+        });
+        const notifyUserIds = [...new Set([
+          ...superAdmins.map(u => u.id),
+          ...societyAdmins.map(u => u.id)
+        ])];
+        const title = `Emergency: ${(type || 'ALERT').toUpperCase()}`;
+        const notifDesc = `${alert.user.name} – ${description || 'No description'}`;
+        for (const uid of notifyUserIds) {
+          await prisma.notification.create({
+            data: {
+              userId: uid,
+              title,
+              description: notifDesc,
+              type: 'emergency',
+              read: false
+            }
+          });
+        }
+      } catch (notifErr) {
+        console.error('EmergencyAlert: notification create failed', notifErr.message);
+      }
+
       res.status(201).json(alert);
     } catch (error) {
       console.error('Create Alert Error:', error);

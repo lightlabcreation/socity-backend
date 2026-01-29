@@ -38,18 +38,13 @@ const getById = async (req, res) => {
     const event = await prisma.event.findUnique({
       where: { id: parseInt(id) },
       include: {
-        _count: {
-          select: { rsvps: { where: { status: 'RSVP' } } }
-        },
-        rsvps: {
-          where: { userId: req.user.id },
-          select: { status: true }
-        }
+        _count: { select: { rsvps: { where: { status: 'RSVP' } } } },
+        rsvps: { where: { userId: req.user.id }, select: { status: true } }
       }
     });
-
-    if (!event) {
-      return res.status(404).json({ success: false, message: 'Event not found' });
+    if (!event) return res.status(404).json({ success: false, message: 'Event not found' });
+    if (req.user.role !== 'SUPER_ADMIN' && event.societyId !== req.user.societyId) {
+      return res.status(403).json({ success: false, message: 'Access denied: event belongs to another society' });
     }
 
     const formattedEvent = {
@@ -119,6 +114,11 @@ const update = async (req, res) => {
 const getAttendees = async (req, res) => {
   try {
     const { id } = req.params;
+    const event = await prisma.event.findUnique({ where: { id: parseInt(id) } });
+    if (!event) return res.status(404).json({ success: false, message: 'Event not found' });
+    if (req.user.role !== 'SUPER_ADMIN' && event.societyId !== req.user.societyId) {
+      return res.status(403).json({ success: false, message: 'Access denied: event belongs to another society' });
+    }
     const attendees = await prisma.eventRsvp.findMany({
       where: {
         eventId: parseInt(id),
@@ -175,9 +175,12 @@ const rsvp = async (req, res) => {
 const remove = async (req, res) => {
   try {
     const { id } = req.params;
-    await prisma.event.delete({
-      where: { id: parseInt(id) }
-    });
+    const existing = await prisma.event.findUnique({ where: { id: parseInt(id) } });
+    if (!existing) return res.status(404).json({ success: false, message: 'Event not found' });
+    if (req.user.role !== 'SUPER_ADMIN' && existing.societyId !== req.user.societyId) {
+      return res.status(403).json({ success: false, message: 'Access denied: event belongs to another society' });
+    }
+    await prisma.event.delete({ where: { id: parseInt(id) } });
     res.json({ success: true, message: 'Event deleted' });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

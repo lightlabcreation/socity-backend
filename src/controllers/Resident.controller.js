@@ -294,6 +294,56 @@ class ResidentController {
                 console.error('Socket emit failed:', socketError.message);
             }
 
+            // Create in-app Notification for all Super Admins (and society admins) so they see it in bell
+            try {
+                const superAdmins = await prisma.user.findMany({
+                    where: { role: 'SUPER_ADMIN' },
+                    select: { id: true }
+                });
+                const societyAdmins = await prisma.user.findMany({
+                    where: { societyId, role: { in: ['ADMIN', 'COMMITTEE'] } },
+                    select: { id: true }
+                });
+                const notifyUserIds = [...new Set([
+                    ...superAdmins.map(u => u.id),
+                    ...societyAdmins.map(u => u.id)
+                ])];
+                const title = `SOS: ${(type || 'EMERGENCY').toUpperCase()}`;
+                const description = `Emergency reported by ${alert.resident.name} at ${location || 'N/A'}`;
+                for (const uid of notifyUserIds) {
+                    await prisma.notification.create({
+                        data: {
+                            userId: uid,
+                            title,
+                            description,
+                            type: 'emergency',
+                            read: false
+                        }
+                    });
+                }
+            } catch (notifErr) {
+                console.error('SOS: notification create failed', notifErr.message);
+            }
+
+            // Create EmergencyLog entry so it shows on Super Admin Emergency Logs page
+            try {
+                const unitStr = location || (alert.resident?.ownedUnits?.[0] ? `${alert.resident.ownedUnits[0].block}-${alert.resident.ownedUnits[0].number}` : null) || (alert.resident?.rentedUnits?.[0] ? `${alert.resident.rentedUnits[0].block}-${alert.resident.rentedUnits[0].number}` : null) || 'N/A';
+                await prisma.emergencyLog.create({
+                    data: {
+                        visitorName: 'SOS – ' + (alert.resident?.name || 'User'),
+                        visitorPhone: alert.resident?.phone || 'N/A',
+                        residentName: alert.resident?.name || 'N/A',
+                        unit: unitStr,
+                        isEmergency: true,
+                        societyId: societyId,
+                        reason: `SOS triggered: ${(type || 'EMERGENCY').toUpperCase()} at ${location || unitStr}`,
+                        barcodeId: 'SOS_TRIGGER'
+                    }
+                });
+            } catch (logErr) {
+                console.error('SOS: EmergencyLog create failed', logErr.message);
+            }
+
             res.json(alert);
         } catch (error) {
             res.status(500).json({ error: error.message });
@@ -351,9 +401,11 @@ class ResidentController {
                     { reportedById: userId }
                 ];
             } else if (role === 'SUPER_ADMIN') {
-                // Super Admins logic - matching ComplaintController defaults
-                // showing public tickets 
-                where.isPrivate = false;
+                // Super Admins see public tickets OR admin-escalated complaints
+                where.OR = [
+                    { isPrivate: false },
+                    { escalatedToSuperAdmin: true }
+                ];
             }
 
             const tickets = await prisma.complaint.findMany({
@@ -401,14 +453,20 @@ class ResidentController {
 
     static async createTicket(req, res) {
         try {
-            const { title, description, category, priority, isPrivate } = req.body;
+            const { title, description, category, priority, isPrivate, vendorId } = req.body;
+            const isAdminEscalation = (req.user.role === 'ADMIN' || req.user.role === 'COMMITTEE');
             const ticket = await prisma.complaint.create({
                 data: {
-                    title, description, category,
+                    title,
+                    description,
+                    category,
                     priority: priority?.toUpperCase() || 'MEDIUM',
                     reportedById: req.user.id,
                     societyId: req.user.societyId,
-                    status: 'OPEN'
+                    status: 'OPEN',
+                    isPrivate: isAdminEscalation ? true : (isPrivate ?? false),
+                    escalatedToSuperAdmin: isAdminEscalation,
+                    vendorId: isAdminEscalation ? null : (vendorId != null ? parseInt(vendorId, 10) : null)
                 }
             });
             res.json(ticket);

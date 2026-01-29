@@ -57,8 +57,9 @@ const getById = async (req, res) => {
         }
       }
     });
-    if (!parcel) {
-      return res.status(404).json({ success: false, message: 'Parcel not found' });
+    if (!parcel) return res.status(404).json({ success: false, message: 'Parcel not found' });
+    if (req.user.role !== 'SUPER_ADMIN' && parcel.societyId !== req.user.societyId) {
+      return res.status(403).json({ success: false, message: 'Access denied: parcel belongs to another society' });
     }
     res.json({ success: true, data: parcel });
   } catch (error) {
@@ -94,9 +95,11 @@ const updateStatus = async (req, res) => {
   try {
     const { id } = req.params;
     const { status, collectedBy, collectedAt } = req.body;
-    
-    // Validate status if needed
-    
+    const existing = await prisma.parcel.findUnique({ where: { id: parseInt(id) } });
+    if (!existing) return res.status(404).json({ success: false, message: 'Parcel not found' });
+    if (req.user.role !== 'SUPER_ADMIN' && existing.societyId !== req.user.societyId) {
+      return res.status(403).json({ success: false, message: 'Access denied: parcel belongs to another society' });
+    }
     const parcel = await prisma.parcel.update({
       where: { id: parseInt(id) },
       data: {
@@ -115,9 +118,12 @@ const updateStatus = async (req, res) => {
 const remove = async (req, res) => {
   try {
     const { id } = req.params;
-    await prisma.parcel.delete({
-      where: { id: parseInt(id) }
-    });
+    const existing = await prisma.parcel.findUnique({ where: { id: parseInt(id) } });
+    if (!existing) return res.status(404).json({ success: false, message: 'Parcel not found' });
+    if (req.user.role !== 'SUPER_ADMIN' && existing.societyId !== req.user.societyId) {
+      return res.status(403).json({ success: false, message: 'Access denied: parcel belongs to another society' });
+    }
+    await prisma.parcel.delete({ where: { id: parseInt(id) } });
     res.json({ success: true, message: 'Parcel deleted' });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

@@ -113,14 +113,33 @@ class LedgerController {
   static async createAccount(req, res) {
       try {
           const { name, code, type } = req.body;
+          if (!name || !code || !type) {
+              return res.status(400).json({ error: 'Name, code and type are required' });
+          }
+          const societyId = req.user.societyId;
+          const existing = await prisma.ledgerAccount.findFirst({
+              where: { societyId, code: String(code).trim() }
+          });
+          if (existing) {
+              return res.status(400).json({
+                  error: 'This account code is already in use. Please choose a different code.'
+              });
+          }
           const account = await prisma.ledgerAccount.create({
               data: {
-                  name, code, type,
-                  societyId: req.user.societyId
+                  name: name.trim(),
+                  code: String(code).trim(),
+                  type,
+                  societyId
               }
           });
           res.json(account);
       } catch (error) {
+          if (error.code === 'P2002') {
+              return res.status(400).json({
+                  error: 'This account code is already in use. Please choose a different code.'
+              });
+          }
           res.status(500).json({ error: error.message });
       }
   }

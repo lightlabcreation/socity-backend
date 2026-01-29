@@ -50,6 +50,11 @@ class FacilityRequestController {
         try {
             const { id } = req.params;
             const { status } = req.body;
+            const existing = await prisma.facilityRequest.findUnique({ where: { id: parseInt(id) } });
+            if (!existing) return res.status(404).json({ error: 'Request not found' });
+            if (req.user.role !== 'SUPER_ADMIN' && existing.societyId !== req.user.societyId) {
+                return res.status(403).json({ error: 'Access denied: request belongs to another society' });
+            }
             const request = await prisma.facilityRequest.update({
                 where: { id: parseInt(id) },
                 data: { status }
@@ -71,6 +76,9 @@ class FacilityRequestController {
             });
 
             if (!request) return res.status(404).json({ error: 'Request not found' });
+            if (req.user.role !== 'SUPER_ADMIN' && request.societyId !== req.user.societyId) {
+                return res.status(403).json({ error: 'Access denied: request belongs to another society' });
+            }
 
             let votes = request.votes || [];
             const existingVoteIndex = votes.findIndex(v => v.userId === userId);

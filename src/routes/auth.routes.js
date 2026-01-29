@@ -13,7 +13,7 @@ router.post('/profile/photo', authenticate, require('../middlewares/upload.middl
 // Super Admin
 router.get('/b2c-stats', authenticate, authorize(['SUPER_ADMIN']), UserController.getB2CStats);
 router.get('/stats', authenticate, authorize(['SUPER_ADMIN']), UserController.getUserStats);
-router.get('/all', authenticate, authorize(['SUPER_ADMIN']), UserController.getAllUsers);
+router.get('/all', authenticate, authorize(['SUPER_ADMIN', 'ADMIN', 'COMMITTEE']), UserController.getAllUsers);
 router.patch('/:id/status', authenticate, authorize(['SUPER_ADMIN']), UserController.updateUserStatus);
 
 // Society Admins Management (Super Admin)

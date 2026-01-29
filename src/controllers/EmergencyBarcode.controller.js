@@ -4,8 +4,9 @@ class EmergencyBarcodeController {
   static async listBarcodes(req, res) {
     try {
       const where = {};
+      const role = (req.user.role || '').toUpperCase();
       
-      if (req.user.role === 'RESIDENT') {
+      if (role === 'RESIDENT') {
         let phone = req.user.phone;
         if (!phone) {
           const user = await prisma.user.findUnique({ where: { id: req.user.id } });
@@ -13,6 +14,22 @@ class EmergencyBarcodeController {
         }
         where.phone = phone || 'N/A';
         where.societyId = req.user.societyId;
+      } else if (role === 'INDIVIDUAL') {
+        // Individual users: filter by phone and residentName (they have no societyId)
+        let phone = req.user.phone;
+        let userName = req.user.name;
+        if (!phone || !userName) {
+          const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+          phone = phone || user?.phone;
+          userName = userName || user?.name;
+        }
+        // Filter by phone (primary) or residentName (fallback)
+        if (phone) {
+          where.phone = phone;
+        } else if (userName) {
+          where.residentName = userName;
+        }
+        where.societyId = null; // Individual users have no society
       } else if (req.user.role !== 'SUPER_ADMIN') {
         where.societyId = req.user.societyId;
       }
@@ -30,9 +47,10 @@ class EmergencyBarcodeController {
   static async createBarcode(req, res) {
     try {
       const { label, type } = req.body;
+      const role = (req.user.role || '').toUpperCase();
       let { name, phone, societyId, unit } = req.user;
 
-      if (!phone || !unit) {
+      if (!phone) {
         const fullUser = await prisma.user.findUnique({ 
           where: { id: req.user.id },
           include: { society: true }
@@ -40,7 +58,14 @@ class EmergencyBarcodeController {
         name = fullUser.name;
         phone = fullUser.phone;
         societyId = fullUser.societyId;
-        // In the schema, unit is a relation. We might need to find the unit string.
+      }
+
+      // For Individual users, unit is always 'N/A' (they have no unit)
+      if (role === 'INDIVIDUAL') {
+        unit = 'N/A';
+        societyId = null; // Individual users have no society
+      } else if (!unit) {
+        // For other roles, try to find unit
         const ownedUnit = await prisma.unit.findFirst({ where: { ownerId: req.user.id } });
         const rentedUnit = await prisma.unit.findFirst({ where: { tenantId: req.user.id } });
         const unitObj = ownedUnit || rentedUnit;
@@ -61,7 +86,7 @@ class EmergencyBarcodeController {
           type: type || 'property',
           qrCodeUrl,
           status: 'active',
-          societyId
+          societyId: role === 'INDIVIDUAL' ? null : societyId
         }
       });
 

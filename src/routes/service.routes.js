@@ -13,5 +13,6 @@ router.get('/inquiries', authenticate, ServiceInquiryController.listInquiries);
 router.post('/inquiries', authenticate, ServiceInquiryController.createInquiry);
 router.put('/inquiries/:id/assign', authenticate, authorize(['SUPER_ADMIN']), ServiceInquiryController.assignVendor);
 router.patch('/inquiries/:id/assign', authenticate, authorize(['SUPER_ADMIN']), ServiceInquiryController.assignVendor);
+router.patch('/inquiries/:id/status', authenticate, ServiceInquiryController.updateStatus);
 
 module.exports = router;

@@ -25,11 +25,10 @@ const getAll = async (req, res) => {
 const getById = async (req, res) => {
   try {
     const { id } = req.params;
-    const document = await prisma.document.findUnique({
-      where: { id: parseInt(id) }
-    });
-    if (!document) {
-      return res.status(404).json({ success: false, message: 'Document not found' });
+    const document = await prisma.document.findUnique({ where: { id: parseInt(id) } });
+    if (!document) return res.status(404).json({ success: false, message: 'Document not found' });
+    if (req.user.role !== 'SUPER_ADMIN' && document.societyId !== req.user.societyId) {
+      return res.status(403).json({ success: false, message: 'Access denied: document belongs to another society' });
     }
     res.json({ success: true, data: document });
   } catch (error) {
@@ -75,9 +74,12 @@ const create = async (req, res) => {
 const remove = async (req, res) => {
   try {
     const { id } = req.params;
-    await prisma.document.delete({
-      where: { id: parseInt(id) }
-    });
+    const existing = await prisma.document.findUnique({ where: { id: parseInt(id) } });
+    if (!existing) return res.status(404).json({ success: false, message: 'Document not found' });
+    if (req.user.role !== 'SUPER_ADMIN' && existing.societyId !== req.user.societyId) {
+      return res.status(403).json({ success: false, message: 'Access denied: document belongs to another society' });
+    }
+    await prisma.document.delete({ where: { id: parseInt(id) } });
     res.json({ success: true, message: 'Document deleted' });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

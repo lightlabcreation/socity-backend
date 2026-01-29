@@ -4,10 +4,15 @@ const cloudinary = require('../config/cloudinary');
 class VisitorController {
   static async list(req, res) {
     try {
+      const societyId = req.user.societyId;
+      if (!societyId && req.user.role !== 'SUPER_ADMIN') {
+        return res.status(403).json({ error: 'Visitor list is only available for society-scoped users' });
+      }
+      if (!societyId) {
+        return res.json([]);
+      }
       const { status, search, unitId, date, block } = req.query;
-      const where = {
-        societyId: req.user.societyId
-      };
+      const where = { societyId };
 
       // Status filter
       if (status && status !== 'all') {
@@ -86,6 +91,9 @@ class VisitorController {
   static async getStats(req, res) {
     try {
       const societyId = req.user.societyId;
+      if (!societyId) {
+        return res.json({ totalToday: 0, activeNow: 0, preApproved: 0, totalMonth: 0 });
+      }
       const today = new Date();
       today.setHours(0, 0, 0, 0);
 
@@ -132,6 +140,10 @@ class VisitorController {
 
   static async checkIn(req, res) {
     try {
+      const societyId = req.user.societyId;
+      if (!societyId) {
+        return res.status(403).json({ error: 'Visitor check-in is only for society-scoped users' });
+      }
       const { name, phone, visitingUnitId, purpose, vehicleNo, idType, idNumber } = req.body;
       let photoUrl = null;
 
@@ -146,16 +158,17 @@ class VisitorController {
         photoUrl = uploadResponse.secure_url;
       }
 
-      // Auto-assign resident if unit is provided
+      // Auto-assign resident if unit is provided; ensure unit belongs to same society
       let residentId = null;
       if (visitingUnitId) {
         const unit = await prisma.unit.findUnique({
           where: { id: parseInt(visitingUnitId) },
           include: { owner: true, tenant: true }
         });
-        if (unit) {
-          residentId = unit.tenantId || unit.ownerId;
+        if (unit && unit.societyId !== societyId) {
+          return res.status(403).json({ error: 'Unit belongs to another society' });
         }
+        if (unit) residentId = unit.tenantId || unit.ownerId;
       }
 
       const visitor = await prisma.visitor.create({
@@ -168,10 +181,10 @@ class VisitorController {
           vehicleNo,
           idType,
           idNumber,
-          photo: photoUrl, // Save URL
+          photo: photoUrl,
           status: 'CHECKED_IN',
           entryTime: new Date(),
-          societyId: req.user.societyId
+          societyId
         }
       });
       res.status(201).json(visitor);
@@ -183,6 +196,10 @@ class VisitorController {
 
   static async preApprove(req, res) {
     try {
+      const societyId = req.user.societyId;
+      if (!societyId) {
+        return res.status(403).json({ error: 'Pre-approval is only for society-scoped users' });
+      }
       const { name, phone, purpose, visitingUnitId, vehicleNo } = req.body;
       let photoUrl = null;
 
@@ -199,9 +216,15 @@ class VisitorController {
       let unitId = visitingUnitId;
       if (req.user.role === 'RESIDENT' && !unitId) {
         const userUnit = await prisma.unit.findFirst({
-          where: { OR: [{ ownerId: req.user.id }, { tenantId: req.user.id }] }
+          where: { OR: [{ ownerId: req.user.id }, { tenantId: req.user.id }], societyId }
         });
         if (userUnit) unitId = userUnit.id;
+      }
+      if (unitId) {
+        const unit = await prisma.unit.findUnique({ where: { id: parseInt(unitId) } });
+        if (unit && unit.societyId !== societyId) {
+          return res.status(403).json({ error: 'Unit belongs to another society' });
+        }
       }
 
       const visitor = await prisma.visitor.create({
@@ -214,7 +237,7 @@ class VisitorController {
           residentId: req.user.role === 'RESIDENT' ? req.user.id : null,
           status: 'APPROVED',
           photo: photoUrl,
-          societyId: req.user.societyId
+          societyId
         }
       });
       res.status(201).json(visitor);
@@ -227,12 +250,14 @@ class VisitorController {
   static async checkOut(req, res) {
     try {
       const { id } = req.params;
+      const existing = await prisma.visitor.findUnique({ where: { id: parseInt(id) } });
+      if (!existing) return res.status(404).json({ error: 'Visitor not found' });
+      if (req.user.role !== 'SUPER_ADMIN' && existing.societyId !== req.user.societyId) {
+        return res.status(403).json({ error: 'Access denied: visitor belongs to another society' });
+      }
       const visitor = await prisma.visitor.update({
         where: { id: parseInt(id) },
-        data: {
-          status: 'CHECKED_OUT',
-          exitTime: new Date()
-        }
+        data: { status: 'CHECKED_OUT', exitTime: new Date() }
       });
       res.json(visitor);
     } catch (error) {
@@ -244,10 +269,14 @@ class VisitorController {
     try {
       const { id } = req.params;
       const { status } = req.body;
-
+      const existing = await prisma.visitor.findUnique({ where: { id: parseInt(id) } });
+      if (!existing) return res.status(404).json({ error: 'Visitor not found' });
+      if (req.user.role !== 'SUPER_ADMIN' && existing.societyId !== req.user.societyId) {
+        return res.status(403).json({ error: 'Access denied: visitor belongs to another society' });
+      }
       const visitor = await prisma.visitor.update({
         where: { id: parseInt(id) },
-        data: { status: status.toUpperCase() }
+        data: { status: (status || '').toUpperCase() }
       });
       res.json(visitor);
     } catch (error) {

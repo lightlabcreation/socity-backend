@@ -10,6 +10,7 @@ router.post('/notices', authenticate, authorize(['ADMIN']), SocietyController.po
 router.get('/admin-dashboard-stats', authenticate, authorize(['ADMIN', 'SUPER_ADMIN']), SocietyController.getAdminDashboardStats);
 router.get('/members', authenticate, SocietyController.getMembers);
 router.post('/members', authenticate, authorize(['ADMIN']), SocietyController.addMember);
+router.delete('/members/:id', authenticate, authorize(['ADMIN']), SocietyController.removeMember);
 
 // Super Admin
 router.get('/stats', authenticate, authorize(['SUPER_ADMIN']), SocietyController.getStats);
@@ -19,6 +20,8 @@ router.put('/:id', authenticate, authorize(['SUPER_ADMIN']), SocietyController.u
 router.patch('/:id/status', authenticate, authorize(['SUPER_ADMIN']), SocietyController.updateSocietyStatus);
 router.delete('/:id', authenticate, authorize(['SUPER_ADMIN']), SocietyController.deleteSociety);
 
+// Guidelines: for-me is for any authenticated user (Admin/Resident/Individual/Vendor)
+router.get('/guidelines/for-me', authenticate, SocietyController.getGuidelinesForMe);
 // Guidelines Management (Super Admin)
 router.get('/guidelines', authenticate, authorize(['SUPER_ADMIN']), SocietyController.getGuidelines);
 router.post('/guidelines', authenticate, authorize(['SUPER_ADMIN']), SocietyController.createGuideline);

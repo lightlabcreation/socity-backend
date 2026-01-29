@@ -19,11 +19,10 @@ const getAll = async (req, res) => {
 const getById = async (req, res) => {
   try {
     const { id } = req.params;
-    const asset = await prisma.asset.findUnique({
-      where: { id: parseInt(id) }
-    });
-    if (!asset) {
-      return res.status(404).json({ success: false, message: 'Asset not found' });
+    const asset = await prisma.asset.findUnique({ where: { id: parseInt(id) } });
+    if (!asset) return res.status(404).json({ success: false, message: 'Asset not found' });
+    if (req.user.role !== 'SUPER_ADMIN' && asset.societyId !== req.user.societyId) {
+      return res.status(403).json({ success: false, message: 'Access denied: asset belongs to another society' });
     }
     res.json({ success: true, data: asset });
   } catch (error) {
@@ -79,9 +78,12 @@ const update = async (req, res) => {
 const remove = async (req, res) => {
   try {
     const { id } = req.params;
-    await prisma.asset.delete({
-      where: { id: parseInt(id) }
-    });
+    const existing = await prisma.asset.findUnique({ where: { id: parseInt(id) } });
+    if (!existing) return res.status(404).json({ success: false, message: 'Asset not found' });
+    if (req.user.role !== 'SUPER_ADMIN' && existing.societyId !== req.user.societyId) {
+      return res.status(403).json({ success: false, message: 'Access denied: asset belongs to another society' });
+    }
+    await prisma.asset.delete({ where: { id: parseInt(id) } });
     res.json({ success: true, message: 'Asset deleted' });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
