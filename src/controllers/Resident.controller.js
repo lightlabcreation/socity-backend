@@ -7,24 +7,35 @@ class ResidentController {
             const userId = req.user.id;
             const societyId = req.user.societyId;
 
-            // 1. Fetch User and Unit details
+            if (!societyId) {
+                return res.status(400).json({ error: 'Resident must belong to a society' });
+            }
+
+            // 1. Society name for header
+            const society = await prisma.society.findUnique({
+                where: { id: societyId },
+                select: { name: true }
+            });
+
+            // 2. Fetch User and Unit details
             const user = await prisma.user.findUnique({
                 where: { id: userId },
                 include: {
                     ownedUnits: {
                         where: { societyId },
-                        include: { parkingSlots: true, members: true, petsList: true }
+                        include: { parkingSlots: true, members: true, petsList: true, vehicles: true }
                     },
                     rentedUnits: {
                         where: { societyId },
-                        include: { parkingSlots: true, members: true, petsList: true }
+                        include: { parkingSlots: true, members: true, petsList: true, vehicles: true }
                     }
                 }
             });
 
             const unit = user.ownedUnits[0] || user.rentedUnits[0];
+            const isOwner = user.ownedUnits?.length > 0;
 
-            // 2. Gate Updates (Visitors today)
+            // 3. Gate Updates (Visitors today)
             const today = new Date();
             today.setHours(0, 0, 0, 0);
 
@@ -42,20 +53,20 @@ class ResidentController {
                 }
             }) : 0;
 
-            // 3. Announcements (Notices)
+            // 4. Announcements (Notices) – audience by owner/tenant, not role
             const announcements = await prisma.notice.findMany({
                 where: {
                     societyId,
                     OR: [
                         { audience: 'ALL' },
-                        { audience: user.role === 'OWNER' ? 'OWNERS' : 'TENANTS' }
+                        { audience: isOwner ? 'OWNERS' : 'TENANTS' }
                     ]
                 },
                 orderBy: { createdAt: 'desc' },
                 take: 5
             });
 
-            // 4. Community Buzz
+            // 5. Community Buzz
             const buzz = await prisma.communityBuzz.findMany({
                 where: { societyId },
                 include: { author: { select: { name: true } } },
@@ -63,19 +74,48 @@ class ResidentController {
                 take: 5
             });
 
+            // 6. Upcoming events (society, date >= today)
+            const todayStart = new Date();
+            todayStart.setHours(0, 0, 0, 0);
+            const events = await prisma.event.findMany({
+                where: { societyId, date: { gte: todayStart }, status: 'UPCOMING' },
+                orderBy: { date: 'asc' },
+                take: 5
+            });
+
+            // 7. Dues – pending/overdue invoices for this unit
+            let duesAmount = 0;
+            let duesPenalty = 0;
+            if (unit) {
+                const duesRows = await prisma.invoice.aggregate({
+                    where: {
+                        unitId: unit.id,
+                        status: { in: ['PENDING', 'OVERDUE'] }
+                    },
+                    _sum: { amount: true, penalty: true }
+                });
+                duesAmount = Number(duesRows._sum?.amount ?? 0);
+                duesPenalty = Number(duesRows._sum?.penalty ?? 0);
+            }
+
             res.json({
+                societyName: society?.name ?? null,
                 unit: unit ? {
                     unitNo: `${unit.block} - ${unit.number}`,
-                    members: unit.members.length,
-                    pets: unit.petsList.length,
-                    vehicles: unit.parkingSlots.length
+                    members: unit.members?.length ?? 0,
+                    pets: unit.petsList?.length ?? 0,
+                    vehicles: unit.vehicles?.length ?? unit.parkingSlots?.length ?? 0
                 } : null,
                 gateUpdates: [
                     { type: 'Visitor', count: visitorsToday, label: 'Today', color: 'bg-purple-100 text-purple-600' },
-                    { type: 'Helper', count: `0/4`, label: 'In campus', color: 'bg-pink-100 text-pink-600' },
+                    { type: 'Helper', count: '0/4', label: 'In campus', color: 'bg-pink-100 text-pink-600' },
                     { type: 'Parcel', count: parcelsToCollect, label: 'Yet to collect', color: 'bg-blue-100 text-blue-600' }
                 ],
-                dues: { amount: 0, penalty: 0 }, // Placeholder
+                dues: {
+                    amount: duesAmount,
+                    penalty: duesPenalty,
+                    penaltyLabel: duesPenalty > 0 ? 'Overdue-Accrued Penalty' : null
+                },
                 announcements: announcements.map(a => ({
                     id: a.id,
                     title: a.title,
@@ -86,12 +126,18 @@ class ResidentController {
                 })),
                 buzz: buzz.map(b => ({
                     id: b.id,
-                    type: b.type.toLowerCase(),
+                    type: (b.type || '').toLowerCase(),
                     title: b.title,
-                    author: b.author.name,
-                    hasResult: b.hasResult
+                    author: b.author?.name ?? 'Unknown',
+                    hasResult: b.hasResult ?? false
                 })),
-                events: []
+                events: events.map(e => ({
+                    id: e.id,
+                    title: e.title,
+                    date: e.date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }),
+                    time: e.time || 'TBD',
+                    location: e.location || 'TBD'
+                }))
             });
 
         } catch (error) {
@@ -592,15 +638,15 @@ class ResidentController {
         }
     }
 
-    // --- Services ---
+    // --- Services --- (Resident + Individual: own inquiries; Individual has societyId null)
     static async getServices(req, res) {
         try {
             const categories = await prisma.serviceCategory.findMany({ include: { variants: true } });
+            const where = { residentId: req.user.id };
+            if (req.user.societyId != null) where.societyId = req.user.societyId;
+            else where.societyId = null;
             const myRequests = await prisma.serviceInquiry.findMany({
-                where: {
-                    societyId: req.user.societyId,
-                    residentId: req.user.id
-                },
+                where,
                 orderBy: { createdAt: 'desc' }
             });
             res.json({ categories, myRequests });
@@ -611,7 +657,18 @@ class ResidentController {
 
     static async createServiceInquiry(req, res) {
         try {
-            const { serviceId, serviceName, type, preferredDate, preferredTime, notes, phone } = req.body;
+            const { serviceId, serviceName, type, preferredDate, preferredTime, notes, phone, pincode } = req.body;
+            const role = (req.user.role || '').toUpperCase();
+            const isIndividual = role === 'INDIVIDUAL';
+
+            // Individual: pincode is mandatory for vendor assignment
+            if (isIndividual) {
+                const pin = (pincode ?? '').toString().trim();
+                if (!pin || pin.length < 5 || pin.length > 10) {
+                    return res.status(400).json({ error: 'PIN Code is required for service requests. Please enter a valid PIN Code (e.g. 6 digits).' });
+                }
+            }
+
             const inquiry = await prisma.serviceInquiry.create({
                 data: {
                     residentId: req.user.id,
@@ -623,6 +680,7 @@ class ResidentController {
                     preferredTime,
                     notes,
                     phone: phone || req.user.phone,
+                    pincode: isIndividual ? (pincode ?? '').toString().trim() : null,
                     status: 'PENDING'
                 }
             });

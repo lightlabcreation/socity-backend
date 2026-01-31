@@ -8,6 +8,7 @@ const getAll = async (req, res) => {
 
     const where = {
       societyId,
+      ...((req.user.role || '').toUpperCase() === 'GUARD' ? { reportedById: req.user.id } : {}),
       ...(status && status !== 'all' ? { status } : {}),
       ...(severity && severity !== 'all' ? { severity } : {}),
       ...(search ? {
@@ -63,11 +64,20 @@ const create = async (req, res) => {
   }
 };
 
-// Update incident status
+// Update incident status (Guard: only own reported incidents)
 const updateStatus = async (req, res) => {
   try {
     const { id } = req.params;
     const { status, assignedToId } = req.body;
+
+    const existing = await prisma.incident.findUnique({ where: { id: parseInt(id) } });
+    if (!existing) return res.status(404).json({ success: false, message: 'Incident not found' });
+    if (req.user.role !== 'SUPER_ADMIN' && existing.societyId !== req.user.societyId) {
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+    if ((req.user.role || '').toUpperCase() === 'GUARD' && existing.reportedById !== req.user.id) {
+      return res.status(403).json({ success: false, message: 'Access denied: you can only update incidents you reported' });
+    }
 
     const incident = await prisma.incident.update({
       where: { id: parseInt(id) },
@@ -83,16 +93,18 @@ const updateStatus = async (req, res) => {
   }
 };
 
-// Get incident stats
+// Get incident stats (Guard: only own reported incidents)
 const getStats = async (req, res) => {
   try {
     const { societyId } = req.user;
+    const guardScope = (req.user.role || '').toUpperCase() === 'GUARD' ? { reportedById: req.user.id } : {};
+    const baseWhere = { societyId, ...guardScope };
 
     const [total, open, resolved, critical] = await Promise.all([
-      prisma.incident.count({ where: { societyId } }),
-      prisma.incident.count({ where: { societyId, status: 'open' } }),
-      prisma.incident.count({ where: { societyId, status: 'resolved' } }),
-      prisma.incident.count({ where: { societyId, severity: 'critical' } })
+      prisma.incident.count({ where: baseWhere }),
+      prisma.incident.count({ where: { ...baseWhere, status: 'open' } }),
+      prisma.incident.count({ where: { ...baseWhere, status: 'resolved' } }),
+      prisma.incident.count({ where: { ...baseWhere, severity: 'critical' } })
     ]);
 
     res.json({

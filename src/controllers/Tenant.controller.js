@@ -135,7 +135,8 @@ class TenantController {
                         password: hashedPassword,
                         role: 'RESIDENT',
                         societyId,
-                        status: 'ACTIVE'
+                        status: 'ACTIVE',
+                        addedByUserId: req.user.id
                     }
                 });
             }

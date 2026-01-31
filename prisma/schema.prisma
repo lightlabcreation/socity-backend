@@ -95,6 +95,8 @@ model Society {
   expectedUnits    Int              @default(0)
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
+  createdByUserId  Int?             // Super Admin who created this society – chat allowed only with this society's admins
+  createdByUser    User?            @relation("SocietyCreatedBy", fields: [createdByUserId], references: [id])
 
   users             User[]
   units             Unit[]
@@ -156,6 +158,12 @@ model User {
   societyId Int?
   society   Society? @relation(fields: [societyId], references: [id])
 
+  pinCode          String?
+  assignedVendorId Int?
+  assignedVendor   Vendor? @relation("VendorAssignments", fields: [assignedVendorId], references: [id])
+  addedByUserId    Int?    // User who added/created this user (Individual can only chat with Super Admin + this user)
+  addedByUser      User?   @relation("UserAddedBy", fields: [addedByUserId], references: [id])
+
   // Relations
   ownedUnits  Unit[] @relation("Owner")
   rentedUnits Unit[] @relation("Tenant")
@@ -188,6 +196,11 @@ model User {
 
   buzzLikes BuzzLike[]
   visitors  Visitor[]
+  checkedInVisitors Visitor[] @relation("VisitorCheckedInBy")
+  loggedParcels     Parcel[]   @relation("ParcelLoggedBy")
+  staffCreatedByGuard Staff[]  @relation("StaffCreatedByGuard")
+  societiesCreated    Society[] @relation("SocietyCreatedBy")
+  usersAdded          User[]    @relation("UserAddedBy")
 
   // Security Relations
   reportedIncidents Incident[]       @relation("ReportedIncidents")
@@ -428,6 +441,9 @@ model Visitor {
   residentId Int?
   resident   User? @relation(fields: [residentId], references: [id])
 
+  checkedInById Int?  // Guard who checked in / approved this visitor
+  checkedInBy   User? @relation("VisitorCheckedInBy", fields: [checkedInById], references: [id])
+
   idType   String? // Aadhar, DL
   idNumber String?
 
@@ -527,6 +543,7 @@ model Vendor {
 
   createdAt        DateTime         @default(now())
   serviceInquiries ServiceInquiry[]
+  assignedResidents User[] @relation("VendorAssignments")
 
   @@map("vendor")
 }
@@ -972,6 +989,8 @@ model Parcel {
   collectedAt    DateTime?
   societyId      Int
   society        Society   @relation(fields: [societyId], references: [id])
+  loggedByGuardId Int?      // Guard who logged this parcel at gate
+  loggedByGuard   User?     @relation("ParcelLoggedBy", fields: [loggedByGuardId], references: [id])
   createdAt      DateTime  @default(now())
 
   @@map("parcel")
@@ -1135,6 +1154,18 @@ model ServiceInquiry {
   vendorName String?
   vendorId   Int?
   vendor     Vendor? @relation(fields: [vendorId], references: [id]) // Add relation if missing
+
+  // Payment (visible only when status = CONFIRMED)
+  paymentStatus   String?   @default("PENDING") // PENDING, PAID, FAILED
+  payableAmount   Float?
+  paymentMethod   String?   // UPI, CARD, NET_BANKING, WALLET, CASH
+  transactionId   String?
+  paymentDate     DateTime?
+
+  // Vendor contacted customer (CONTACT button in Vendor Dashboard)
+  contactedAt   DateTime?
+  contactedBy   Int?      // Vendor id who marked as contacted
+  activityLog   Json?     // Array of { action, time, byVendorId? } for timeline
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1347,6 +1378,9 @@ model Staff {
 
   societyId Int
   society   Society @relation(fields: [societyId], references: [id])
+
+  createdByGuardId Int?  // Guard who created this helper (staff) – guard sees only own
+  createdByGuard   User? @relation("StaffCreatedByGuard", fields: [createdByGuardId], references: [id])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

@@ -4,33 +4,40 @@ class GuardDashboardController {
     static async getStats(req, res) {
         try {
             const societyId = req.user.societyId;
+            const isGuard = (req.user.role || '').toUpperCase() === 'GUARD';
+            const guardId = isGuard ? req.user.id : null;
             const today = new Date();
             today.setHours(0, 0, 0, 0);
 
+            // Guard: only counts for visitors/parcels this guard checked in or logged
             const [visitorsToday, pendingApprovals, parcelsToDeliver, vehiclesIn] = await Promise.all([
                 prisma.visitor.count({
                     where: {
                         societyId,
-                        createdAt: { gte: today }
+                        createdAt: { gte: today },
+                        ...(isGuard && { checkedInById: guardId })
                     }
                 }),
                 prisma.visitor.count({
                     where: {
                         societyId,
-                        status: 'PENDING'
+                        status: 'PENDING',
+                        checkedInById: null // Pending = not yet checked in by any guard
                     }
                 }),
                 prisma.parcel.count({
                     where: {
                         societyId,
-                        status: 'PENDING'
+                        status: 'PENDING',
+                        ...(isGuard && { loggedByGuardId: guardId })
                     }
                 }),
                 prisma.visitor.count({
                     where: {
                         societyId,
                         status: 'CHECKED_IN',
-                        vehicleNo: { not: null, not: '' }
+                        vehicleNo: { not: null, not: '' },
+                        ...(isGuard && { checkedInById: guardId })
                     }
                 })
             ]);
@@ -49,32 +56,48 @@ class GuardDashboardController {
     static async getActivity(req, res) {
         try {
             const societyId = req.user.societyId;
+            const isGuard = (req.user.role || '').toUpperCase() === 'GUARD';
+            const guardId = isGuard ? req.user.id : null;
 
+            // Guard: only activity for visitors/parcels/incidents this guard handled (no staff – guard sees only own data)
             const [visitors, parcels, incidents, staff] = await Promise.all([
                 prisma.visitor.findMany({
-                    where: { societyId },
+                    where: {
+                        societyId,
+                        ...(isGuard && { checkedInById: guardId })
+                    },
                     take: 5,
                     orderBy: { createdAt: 'desc' },
                     include: { unit: true }
                 }),
                 prisma.parcel.findMany({
-                    where: { societyId },
+                    where: {
+                        societyId,
+                        ...(isGuard && { loggedByGuardId: guardId })
+                    },
                     take: 5,
                     orderBy: { createdAt: 'desc' },
                     include: { unit: true }
                 }),
                 prisma.incident.findMany({
-                    where: { societyId },
+                    where: {
+                        societyId,
+                        ...(isGuard && { reportedById: guardId })
+                    },
                     take: 5,
                     orderBy: { createdAt: 'desc' }
                 }),
                 prisma.staff.findMany({
-                    where: { societyId },
+                    where: {
+                        societyId,
+                        ...(isGuard && { createdByGuardId: guardId })
+                    },
                     take: 5,
                     orderBy: { updatedAt: 'desc' }
                 })
             ]);
 
+            const staffList = Array.isArray(staff) ? staff : [];
             // Map to common format
             const activities = [
                 ...visitors.map(v => ({
@@ -101,7 +124,7 @@ class GuardDashboardController {
                     time: i.createdAt,
                     status: 'incident'
                 })),
-                ...staff.map(s => ({
+                ...staffList.map(s => ({
                     id: `staff-${s.id}`,
                     action: s.status === 'ON_DUTY' ? 'Staff Check-in' : 'Staff Check-out',
                     name: s.name,

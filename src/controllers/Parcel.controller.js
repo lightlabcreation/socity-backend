@@ -9,6 +9,9 @@ const getAll = async (req, res) => {
     const { status, search } = req.query;
     
     const where = { societyId };
+    if ((req.user.role || '').toUpperCase() === 'GUARD') {
+      where.loggedByGuardId = req.user.id;
+    }
     
     if (status && status !== 'all') {
       where.status = status; // e.g., 'PENDING', 'COLLECTED', 'OVERDUE'
@@ -61,6 +64,9 @@ const getById = async (req, res) => {
     if (req.user.role !== 'SUPER_ADMIN' && parcel.societyId !== req.user.societyId) {
       return res.status(403).json({ success: false, message: 'Access denied: parcel belongs to another society' });
     }
+    if ((req.user.role || '').toUpperCase() === 'GUARD' && parcel.loggedByGuardId !== req.user.id) {
+      return res.status(403).json({ success: false, message: 'Access denied: you can only view parcels you logged' });
+    }
     res.json({ success: true, data: parcel });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -81,7 +87,8 @@ const create = async (req, res) => {
         description,
         receivedBy,
         status: 'PENDING',
-        societyId
+        societyId,
+        loggedByGuardId: (req.user.role || '').toUpperCase() === 'GUARD' ? req.user.id : null
       }
     });
     res.status(201).json({ success: true, data: parcel });
@@ -99,6 +106,9 @@ const updateStatus = async (req, res) => {
     if (!existing) return res.status(404).json({ success: false, message: 'Parcel not found' });
     if (req.user.role !== 'SUPER_ADMIN' && existing.societyId !== req.user.societyId) {
       return res.status(403).json({ success: false, message: 'Access denied: parcel belongs to another society' });
+    }
+    if ((req.user.role || '').toUpperCase() === 'GUARD' && existing.loggedByGuardId !== req.user.id) {
+      return res.status(403).json({ success: false, message: 'Access denied: you can only update parcels you logged' });
     }
     const parcel = await prisma.parcel.update({
       where: { id: parseInt(id) },
@@ -130,16 +140,18 @@ const remove = async (req, res) => {
   }
 };
 
-// Get parcel statistics
+// Get parcel statistics (Guard: only parcels they logged)
 const getStats = async (req, res) => {
   try {
     const societyId = req.user.societyId;
-    
+    const guardScope = (req.user.role || '').toUpperCase() === 'GUARD' ? { loggedByGuardId: req.user.id } : {};
+    const baseWhere = { societyId, ...guardScope };
+
     const [total, pending, delivered, overdue] = await Promise.all([
-      prisma.parcel.count({ where: { societyId } }),
-      prisma.parcel.count({ where: { societyId, status: 'PENDING' } }),
-      prisma.parcel.count({ where: { societyId, status: 'COLLECTED' } }),
-      prisma.parcel.count({ where: { societyId, status: 'OVERDUE' } }) // Assuming we have a way to mark overdue or check logic
+      prisma.parcel.count({ where: baseWhere }),
+      prisma.parcel.count({ where: { ...baseWhere, status: 'PENDING' } }),
+      prisma.parcel.count({ where: { ...baseWhere, status: 'COLLECTED' } }),
+      prisma.parcel.count({ where: { ...baseWhere, status: 'OVERDUE' } })
     ]);
     
     res.json({

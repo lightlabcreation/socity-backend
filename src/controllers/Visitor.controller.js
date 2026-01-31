@@ -14,6 +14,18 @@ class VisitorController {
       const { status, search, unitId, date, block } = req.query;
       const where = { societyId };
 
+      // Guard: only see (1) visitors they checked in, OR (2) pending/approved not yet checked in by any guard
+      // Do NOT show checkedInById=null with CHECKED_IN/CHECKED_OUT (legacy) – else both guards see same list
+      const isGuard = (req.user.role || '').toUpperCase() === 'GUARD';
+      if (isGuard) {
+        where.AND = (where.AND || []).concat({
+          OR: [
+            { checkedInById: req.user.id },
+            { checkedInById: null, status: { in: ['PENDING', 'APPROVED', 'PRE_APPROVED'] } }
+          ]
+        });
+      }
+
       // Status filter
       if (status && status !== 'all') {
         const statusMap = {
@@ -56,15 +68,17 @@ class VisitorController {
         }
       }
 
-      // Search filter
-      if (search) {
-        where.OR = [
-          { name: { contains: search } },
-          { phone: { contains: search } },
-          { purpose: { contains: search } },
-          { unit: { block: { contains: search } } },
-          { unit: { number: { contains: search } } }
-        ];
+      // Search filter (AND with guard filter so guard scope is never lost)
+      if (search && search.trim()) {
+        where.AND = (where.AND || []).concat({
+          OR: [
+            { name: { contains: search } },
+            { phone: { contains: search } },
+            { purpose: { contains: search } },
+            { unit: { block: { contains: search } } },
+            { unit: { number: { contains: search } } }
+          ]
+        });
       }
 
       const visitors = await prisma.visitor.findMany({
@@ -99,30 +113,39 @@ class VisitorController {
 
       const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
 
+      // Guard: same scope as list – only my visitors OR pending/approved (not legacy checked-in with null)
+      const guardScope = (req.user.role || '').toUpperCase() === 'GUARD'
+        ? { OR: [{ checkedInById: req.user.id }, { checkedInById: null, status: { in: ['PENDING', 'APPROVED', 'PRE_APPROVED'] } }] }
+        : {};
+
       const [totalToday, activeNow, preApproved, totalMonth] = await Promise.all([
         prisma.visitor.count({
           where: {
             societyId,
-            createdAt: { gte: today }
+            createdAt: { gte: today },
+            ...guardScope
           }
         }),
         prisma.visitor.count({
           where: {
             societyId,
-            status: 'CHECKED_IN'
+            status: 'CHECKED_IN',
+            ...guardScope
           }
         }),
         prisma.visitor.count({
           where: {
             societyId,
             status: { in: ['APPROVED', 'PRE_APPROVED'] },
-            createdAt: { gte: today } // Assuming pre-approved for today? or just general
+            createdAt: { gte: today },
+            ...guardScope
           }
         }),
         prisma.visitor.count({
           where: {
             societyId,
-            createdAt: { gte: firstDayOfMonth }
+            createdAt: { gte: firstDayOfMonth },
+            ...guardScope
           }
         })
       ]);
@@ -184,7 +207,8 @@ class VisitorController {
           photo: photoUrl,
           status: 'CHECKED_IN',
           entryTime: new Date(),
-          societyId
+          societyId,
+          checkedInById: (req.user.role || '').toUpperCase() === 'GUARD' ? req.user.id : null
         }
       });
       res.status(201).json(visitor);
@@ -255,6 +279,9 @@ class VisitorController {
       if (req.user.role !== 'SUPER_ADMIN' && existing.societyId !== req.user.societyId) {
         return res.status(403).json({ error: 'Access denied: visitor belongs to another society' });
       }
+      if ((req.user.role || '').toUpperCase() === 'GUARD' && existing.checkedInById != null && existing.checkedInById !== req.user.id) {
+        return res.status(403).json({ error: 'Access denied: you can only check out visitors you checked in' });
+      }
       const visitor = await prisma.visitor.update({
         where: { id: parseInt(id) },
         data: { status: 'CHECKED_OUT', exitTime: new Date() }
@@ -274,9 +301,16 @@ class VisitorController {
       if (req.user.role !== 'SUPER_ADMIN' && existing.societyId !== req.user.societyId) {
         return res.status(403).json({ error: 'Access denied: visitor belongs to another society' });
       }
+      const newStatus = (status || '').toUpperCase();
+      const updateData = { status: newStatus };
+      // When guard approves or checks in, record this guard as the one who did it
+      if ((req.user.role || '').toUpperCase() === 'GUARD' && (newStatus === 'CHECKED_IN' || newStatus === 'APPROVED')) {
+        updateData.checkedInById = req.user.id;
+        if (newStatus === 'CHECKED_IN') updateData.entryTime = new Date();
+      }
       const visitor = await prisma.visitor.update({
         where: { id: parseInt(id) },
-        data: { status: (status || '').toUpperCase() }
+        data: updateData
       });
       res.json(visitor);
     } catch (error) {

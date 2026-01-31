@@ -152,6 +152,9 @@ class SocietyController {
           : 'password123';
         const hashedPassword = await bcrypt.hash(passwordToUse, 10);
 
+        // Record who added this user (Admin/Super Admin) – Guard can chat only with creator + residents added by same creator
+        const addedByUserId = req.user?.id ?? null;
+
         const user = await tx.user.create({
           data: {
             name,
@@ -160,7 +163,8 @@ class SocietyController {
             role: userRole,
             status: status?.toUpperCase() || 'ACTIVE',
             password: hashedPassword,
-            societyId
+            societyId,
+            ...(addedByUserId != null && { addedByUserId }),
           }
         });
 
@@ -312,6 +316,7 @@ class SocietyController {
         status: 'PENDING',
         subscriptionPlan,
         expectedUnits: parseInt(units) || 0,
+        createdByUserId: req.user?.id ?? null,
       };
 
       if (billingPlanId != null && billingPlanId !== '') {

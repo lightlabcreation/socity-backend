@@ -5,7 +5,7 @@ const prisma = new PrismaClient()
 async function main() {
   console.log('Seeding database with 7 users...')
 
-  // Create a Society
+  // Create societies: main demo society + Platform (for Super Admin ↔ Individual chat)
   const society = await prisma.society.upsert({
     where: { code: 'SOC001' },
     update: {},
@@ -16,6 +16,18 @@ async function main() {
       status: 'ACTIVE'
     }
   })
+
+  const platformSociety = await prisma.society.upsert({
+    where: { code: 'PLATFORM' },
+    update: {},
+    create: {
+      name: 'Platform',
+      address: 'Platform (chat only)',
+      code: 'PLATFORM',
+      status: 'ACTIVE'
+    }
+  })
+  console.log('Platform society for cross-role chat:', platformSociety.id)
 
   const users = [
     { email: 'superadmin@society.com', password: 'super123', name: 'Super Admin', role: 'SUPER_ADMIN' },

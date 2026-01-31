@@ -73,6 +73,14 @@ class VendorController {
           ? servicePincodes.split(',').map(s => s.trim()).filter(Boolean)
           : [];
 
+      // Platform vendors (no society) must have serviceable PIN codes so individual customers can be assigned by PIN code
+      const isPlatformVendor = socId == null;
+      if (isPlatformVendor && pincodeArr.length === 0) {
+        return res.status(400).json({
+          error: 'Serviceable PIN Codes are required for platform vendors. Individual customers are assigned to vendors by their PIN code.',
+        });
+      }
+
       // Transaction to ensure both Vendor and User are created
       const result = await prisma.$transaction(async (tx) => {
           // 1. Create Vendor Profile
