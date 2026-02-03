@@ -186,7 +186,11 @@ class UserController {
       // Find User
       const user = await prisma.user.findUnique({
         where: { email },
-        include: { society: true },
+        include: { 
+          society: {
+            include: { billingPlan: true }
+          } 
+        },
       });
 
       if (!user) {
@@ -204,6 +208,13 @@ class UserController {
         return res.status(403).json({
           error:
             "Your account has been suspended. Please contact your administrator.",
+        });
+      }
+
+      // If society is suspended, block login
+      if (user.society && user.society.status === "SUSPENDED") {
+        return res.status(403).json({
+          error: "Your society has been suspended. Access denied. Please contact support.",
         });
       }
 
@@ -249,7 +260,12 @@ class UserController {
     try {
       const user = await prisma.user.findUnique({
         where: { id: req.user.id },
-        include: { society: true, assignedVendor: true },
+        include: { 
+          society: {
+            include: { billingPlan: true }
+          }, 
+          assignedVendor: true 
+        },
       });
       if (user) {
         user.role = user.role.toLowerCase();
@@ -501,6 +517,8 @@ class UserController {
         profileImg: u.profileImg,
         society: u.society?.name || "N/A",
         societyId: u.societyId,
+        isPaid: u.society?.isPaid || false,
+        subscriptionPlan: u.society?.subscriptionPlan || "BASIC",
         status: u.status.toLowerCase(),
         joinedDate: u.createdAt.toISOString().split("T")[0],
         lastLogin: "2 hours ago", // Mock for now as we don't track'

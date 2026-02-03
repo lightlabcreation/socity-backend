@@ -19,6 +19,7 @@ router.post('/', authenticate, authorize(['SUPER_ADMIN']), SocietyController.cre
 router.put('/:id', authenticate, authorize(['SUPER_ADMIN']), SocietyController.updateSociety);
 router.patch('/:id/status', authenticate, authorize(['SUPER_ADMIN']), SocietyController.updateSocietyStatus);
 router.delete('/:id', authenticate, authorize(['SUPER_ADMIN']), SocietyController.deleteSociety);
+router.post('/:id/pay', authenticate, authorize(['ADMIN', 'SUPER_ADMIN']), SocietyController.processSocietyPayment);
 
 // Guidelines: for-me is for any authenticated user (Admin/Resident/Individual/Vendor)
 router.get('/guidelines/for-me', authenticate, SocietyController.getGuidelinesForMe);

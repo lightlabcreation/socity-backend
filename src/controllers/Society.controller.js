@@ -236,7 +236,7 @@ class SocietyController {
           },
           users: {
             where: { role: 'ADMIN' },
-            select: { name: true, email: true },
+            select: { name: true, email: true, phone: true },
             take: 1
           }
         }
@@ -252,6 +252,10 @@ class SocietyController {
         city: s.city,
         state: s.state,
         pincode: s.pincode,
+        address: s.address,
+        billingPlanId: s.billingPlanId,
+        discount: s.discount,
+        isPaid: s.isPaid,
         expectedUnits: s.expectedUnits,
         unitsCount: s._count.units,
         usersCount: s._count.users,
@@ -292,7 +296,8 @@ class SocietyController {
         adminName,
         adminEmail,
         adminPassword,
-        adminPhone
+        adminPhone,
+        discount
       } = req.body;
 
       // Generate a unique code
@@ -313,10 +318,11 @@ class SocietyController {
         state,
         pincode,
         code,
-        status: 'PENDING',
+        status: 'ACTIVE', // Changed from 'PENDING' to 'ACTIVE' as per instruction
         subscriptionPlan,
         expectedUnits: parseInt(units) || 0,
         createdByUserId: req.user?.id ?? null,
+        discount: (discount != null && discount !== '') ? (parseFloat(discount) || 0) : 0
       };
 
       if (billingPlanId != null && billingPlanId !== '') {
@@ -325,10 +331,7 @@ class SocietyController {
         });
         if (billingPlan && billingPlan.status === 'active') {
           data.billingPlanId = billingPlan.id;
-          const nameUpper = (billingPlan.name || '').toUpperCase();
-          if (nameUpper === 'BASIC' || nameUpper === 'PROFESSIONAL' || nameUpper === 'ENTERPRISE') {
-            data.subscriptionPlan = nameUpper;
-          }
+          data.subscriptionPlan = billingPlan.planType;
         }
       }
 
@@ -360,17 +363,32 @@ class SocietyController {
   static async updateSociety(req, res) {
     try {
       const { id } = req.params;
-      const { name, address, city, state, pincode, subscriptionPlan } = req.body;
+      const { name, address, city, state, pincode, subscriptionPlan, billingPlanId, discount } = req.body;
+      
+      const updateData = {
+        name,
+        address,
+        city,
+        state,
+        pincode,
+        subscriptionPlan: subscriptionPlan?.toUpperCase(),
+        discount: (discount != null && discount !== '') ? (parseFloat(discount) || 0) : (discount === '' ? 0 : undefined)
+      };
+
+      if (billingPlanId != null && billingPlanId !== '') {
+        const bpId = parseInt(billingPlanId);
+        const billingPlan = await prisma.billingPlan.findUnique({
+          where: { id: bpId }
+        });
+        if (billingPlan) {
+          updateData.billingPlanId = bpId;
+          updateData.subscriptionPlan = billingPlan.planType;
+        }
+      }
+
       const society = await prisma.society.update({
         where: { id: parseInt(id) },
-        data: {
-          name,
-          address,
-          city,
-          state,
-          pincode,
-          subscriptionPlan: subscriptionPlan?.toUpperCase()
-        }
+        data: updateData
       });
       res.json(society);
     } catch (error) {
@@ -884,12 +902,95 @@ class SocietyController {
         where: { id: parseInt(id) }
       });
 
-      res.json({ success: true, message: 'Guideline deleted successfully' });
+      res.json({ message: 'Guideline deleted successfully' });
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
   }
 
+  static async processSocietyPayment(req, res) {
+    try {
+      const { id } = req.params;
+      const societyId = parseInt(id);
+
+      const society = await prisma.society.update({
+        where: { id: societyId },
+        data: { isPaid: true },
+        include: { 
+          users: { where: { role: 'ADMIN' }, take: 1 },
+          billingPlan: true
+        }
+      });
+
+      // 0. Generate Invoice
+      let invoice;
+      try {
+        const originalPrice = society.billingPlan?.price || 0;
+        const discount = society.discount || 0;
+        const finalPrice = Math.round(originalPrice * (1 - discount / 100));
+
+        invoice = await prisma.platformInvoice.create({
+          data: {
+            societyId: society.id,
+            invoiceNo: `INV-${society.id}-${Date.now().toString().slice(-6)}`,
+            amount: finalPrice,
+            status: 'PAID',
+            dueDate: new Date(),
+            paidDate: new Date()
+          }
+        });
+      } catch (invErr) {
+        console.error('Invoice Generation Error:', invErr.message);
+      }
+
+      // 1. Notify Super Admins
+      try {
+        const superAdmins = await prisma.user.findMany({
+          where: { role: 'SUPER_ADMIN' },
+          select: { id: true }
+        });
+
+        for (const sa of superAdmins) {
+          await prisma.notification.create({
+            data: {
+              userId: sa.id,
+              title: 'Society Activated',
+              description: `Society "${society.name}" has successfully activated their dashboard.`,
+              type: 'society_activation',
+              metadata: invoice ? { invoiceId: invoice.id } : null
+            }
+          });
+        }
+      } catch (notifErr) {
+        console.error('Super Admin Notification Error:', notifErr.message);
+      }
+
+      // 2. Notify Society Admin (Welcome)
+      try {
+        const societyAdmin = society.users[0];
+        if (societyAdmin) {
+          await prisma.notification.create({
+            data: {
+              userId: societyAdmin.id,
+              title: 'Welcome to Socity!',
+              description: `Your dashboard for "${society.name}" is now active. You can start managing your community now! Click to view your invoice.`,
+              type: 'welcome',
+              metadata: invoice ? { invoiceId: invoice.id } : null
+            }
+          });
+        }
+      } catch (notifErr) {
+        console.error('Society Admin Notification Error:', notifErr.message);
+      }
+
+      res.json({
+        message: 'Payment processed successfully',
+        society
+      });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  }
 }
 
 module.exports = SocietyController;

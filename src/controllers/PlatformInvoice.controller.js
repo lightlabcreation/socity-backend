@@ -3,7 +3,15 @@ const prisma = require('../lib/prisma');
 class PlatformInvoiceController {
   static async listInvoices(req, res) {
     try {
+      const { role, societyId } = req.user;
+      const where = {};
+      
+      if (role === 'ADMIN') {
+        where.societyId = societyId;
+      }
+
       const invoices = await prisma.platformInvoice.findMany({
+        where,
         include: { society: true },
         orderBy: { createdAt: 'desc' }
       });
@@ -91,6 +99,20 @@ class PlatformInvoiceController {
     }
   }
 
+  static async getInvoice(req, res) {
+    try {
+      const { id } = req.params;
+      const invoice = await prisma.platformInvoice.findUnique({
+        where: { id: parseInt(id) },
+        include: { society: true }
+      });
+      if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+      res.json(invoice);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  }
+
   static async updateStatus(req, res) {
     try {
       const { id } = req.params;
@@ -105,6 +127,36 @@ class PlatformInvoiceController {
       });
       res.json(invoice);
     } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  }
+
+  static async delete(req, res) {
+    try {
+      const { id } = req.params;
+      const numericId = parseInt(id);
+      
+      if (isNaN(numericId)) {
+        return res.status(400).json({ error: 'Invalid invoice ID' });
+      }
+
+      console.log('ID received for deletion:', id, 'Parsed ID:', numericId);
+
+      const invoice = await prisma.platformInvoice.findUnique({
+        where: { id: numericId }
+      });
+
+      if (!invoice) {
+        return res.status(404).json({ error: 'Invoice not found' });
+      }
+
+      await prisma.platformInvoice.delete({
+        where: { id: numericId }
+      });
+
+      res.json({ message: 'Invoice deleted successfully' });
+    } catch (error) {
+      console.error('Delete Platform Invoice Error:', error);
       res.status(500).json({ error: error.message });
     }
   }

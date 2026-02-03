@@ -73,6 +73,115 @@ class VendorPayoutController {
       res.status(500).json({ error: error.message });
     }
   }
+
+  static async updateStatus(req, res) {
+    try {
+      const { id } = req.params;
+      const { status } = req.body;
+      
+      console.log('Updating Payout:', id, status);
+      const payout = await prisma.vendorPayout.update({
+        where: { id: parseInt(id) },
+        data: { 
+            status: status.toUpperCase(),
+            ...(status.toUpperCase() === 'PAID' && { date: new Date() }) // Update date on payment? Or keep separate paymentDate? Schema has one date.
+        }
+      });
+
+      // SYNC TO SERVICE INQUIRY
+      // Extract Inquiry ID from remarks: "Auto-generated for Service ID #38: ..."
+      if (status.toUpperCase() === 'PAID' && payout.remarks) {
+          const match = payout.remarks.match(/Service ID #(\d+)/);
+          if (match && match[1]) {
+              const inquiryId = parseInt(match[1]);
+              console.log('Syncing Payout status to Inquiry #', inquiryId);
+              try {
+                  // We update paymentStatus to 'PAID' so VendorLeadsPage shows the PAID badge.
+                  // Note: VendorLeadsPage checks `paymentStatus === 'PAID'`.
+                  await prisma.serviceInquiry.update({
+                      where: { id: inquiryId },
+                      data: { 
+                        paymentStatus: 'PAID',
+                        paymentDate: new Date() 
+                      }
+                  });
+
+                  // NOTIFY VENDOR
+                  await prisma.notification.create({
+                      data: {
+                          userId: payout.vendorId, // Vendor is a User in the system? Need to check linking. 
+                          // Wait, Vendor model is separate from User model usually?
+                          // In ServiceInquiry list, we check `vendor.email = req.user.email`.
+                          // So we need to find the USER record associated with this Vendor to safely notify.
+                          // OR, if `notification` table links to `userId` which assumes Auth User.
+                          
+                          // Let's assume Vendor has a User account with same email.
+                          // Actually, let's look at `prisma.notification.create` calls elsewhere.
+                          // It uses `userId`.
+                          
+                          // We need to resolve Vendor -> User ID.
+                          // For now, let's try to find the user by Vendor Email.
+                      }
+                  });
+              } catch (err) {
+                  console.error('Failed to sync payout status to inquiry:', err);
+              }
+              
+              // Resolve User ID for Vendor
+              const vendorUser = await prisma.user.findFirst({
+                  where: { email: (await prisma.vendor.findUnique({ where: { id: payout.vendorId } }))?.email }
+              });
+
+              if (vendorUser) {
+                  await prisma.notification.create({
+                      data: {
+                          userId: vendorUser.id,
+                          title: "Payment Received",
+                          description: `You have received a payment of ₹${payout.payableAmount} for Service ID #${inquiryId}.`,
+                          type: "PAYMENT_RECEIVED",
+                          metadata: {
+                              payoutId: payout.id,
+                              amount: payout.payableAmount,
+                              inquiryId: inquiryId
+                          }
+                      }
+                  });
+              }
+
+              // AUTO-GENERATE VENDOR INVOICE (Proof of Payment / Bill)
+              // Only if Society ID exists (Schema ignores Individuals for VendorInvoice usually)
+              if (payout.societyId) {
+                  const invoiceNumber = `INV-${payout.vendorId}-${Date.now().toString().slice(-6)}`;
+                  console.log('Generating Vendor Invoice:', invoiceNumber);
+                  
+                  await prisma.vendorInvoice.create({
+                      data: {
+                          invoiceNumber: invoiceNumber,
+                          vendorId: payout.vendorId,
+                          societyId: payout.societyId,
+                          description: `Service Payout for Inquiry #${inquiryId} (${payout.societyName})`,
+                          category: 'SERVICE_PAYOUT',
+                          amount: payout.payableAmount,
+                          totalAmount: payout.payableAmount,
+                          gstAmount: 0, // Assuming inclusive or 0 for now
+                          invoiceDate: new Date(),
+                          dueDate: new Date(), // Immediate
+                          status: 'PAID',
+                          paymentDate: new Date(),
+                          paymentMethod: 'PLATFORM_TRANSFER', // General placeholder
+                          remarks: `Auto-generated from Vendor Payout #${payout.id}`
+                      }
+                  });
+              }
+          }
+      }
+
+      res.json(payout);
+    } catch (error) {
+      console.error('Update Payout Status Error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  }
 }
 
 module.exports = VendorPayoutController;

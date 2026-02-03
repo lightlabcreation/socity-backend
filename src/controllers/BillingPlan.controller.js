@@ -14,11 +14,12 @@ class BillingPlanController {
 
   static async createPlan(req, res) {
     try {
-      const { name, type, price, description, status } = req.body;
+      const { name, type, planType, price, description, status } = req.body;
       const plan = await prisma.billingPlan.create({
         data: {
           name,
           type,
+          planType: planType?.toUpperCase() || 'BASIC',
           price,
           description,
           status: status || 'active'
@@ -33,12 +34,13 @@ class BillingPlanController {
   static async updatePlan(req, res) {
     try {
       const { id } = req.params;
-      const { name, type, price, description, status } = req.body;
+      const { name, type, planType, price, description, status } = req.body;
       const plan = await prisma.billingPlan.update({
         where: { id: parseInt(id) },
         data: {
           name,
           type,
+          planType: planType?.toUpperCase(),
           price,
           description,
           status

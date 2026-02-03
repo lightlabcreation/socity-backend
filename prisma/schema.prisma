@@ -90,6 +90,8 @@ model Society {
   code             String           @unique // Unique code for society login/reg
   status           SocietyStatus    @default(PENDING)
   subscriptionPlan SubscriptionPlan @default(BASIC)
+  isPaid           Boolean          @default(false)
+  discount         Float?           @default(0)
   billingPlanId    Int?
   billingPlan      BillingPlan?     @relation(fields: [billingPlanId], references: [id])
   expectedUnits    Int              @default(0)
@@ -136,6 +138,8 @@ model Society {
   staff            Staff[]
   moveRequests     MoveRequest[]
   facilityRequests FacilityRequest[]
+  communityChats   CommunityChat[]
+  chatGroups       ChatGroup[]
 
   @@map("society")
 }
@@ -207,6 +211,10 @@ model User {
   assignedIncidents Incident[]       @relation("AssignedIncidents")
   patrolLogs        PatrolLog[]      @relation("GuardPatrols")
   parkingPayments   ParkingPayment[]
+  communityChats    CommunityChat[]
+  createdGroups     ChatGroup[]      @relation("GroupCreator")
+  groupMemberships  GroupMember[]
+  groupMessages     GroupMessage[]
   notifications     Notification[]
 
   @@map("user")
@@ -220,6 +228,7 @@ model Notification {
   description String?  @db.Text
   type        String?  // visitor, payment, complaint, booking, lead_assigned, etc.
   read        Boolean  @default(false)
+  metadata    Json?
   createdAt   DateTime @default(now())
 
   @@index([userId])
@@ -743,6 +752,7 @@ model BillingPlan {
   id          Int      @id @default(autoincrement())
   name        String
   type        String // Monthly, Quarterly, Yearly, One-Time
+  planType    SubscriptionPlan @default(BASIC)
   price       String
   description String?  @db.Text
   status      String   @default("active") // active, inactive
@@ -1161,6 +1171,8 @@ model ServiceInquiry {
   paymentMethod   String?   // UPI, CARD, NET_BANKING, WALLET, CASH
   transactionId   String?
   paymentDate     DateTime?
+  
+  vendorPrice     Float?    // Amount agreed to pay the vendor (hidden from user)
 
   // Vendor contacted customer (CONTACT button in Vendor Dashboard)
   contactedAt   DateTime?
@@ -1463,4 +1475,81 @@ model FacilityRequest {
   updatedAt DateTime @updatedAt
 
   @@map("facilityrequest")
+}
+
+model Advertisement {
+  id              Int      @id @default(autoincrement())
+  title           String
+  content         String   @db.Text
+  imageUrl        String?
+  linkUrl         String?  // Optional link to external site or internal page
+  isActive        Boolean  @default(true)
+  type            String   @default("BANNER") // BANNER, CARD, POPUP
+  targetAudience  String?  @default("ALL") // ALL, RESIDENTS, ADMINS, INDIVIDUALS, VENDORS
+  displayOrder    Int      @default(0)
+  startDate       DateTime?
+  endDate         DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("advertisement")
+}
+
+model CommunityChat {
+  id        Int      @id @default(autoincrement())
+  message   String   @db.Text
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id])
+  societyId Int
+  society   Society  @relation(fields: [societyId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([societyId, createdAt])
+  @@map("communitychat")
+}
+
+model ChatGroup {
+  id          Int            @id @default(autoincrement())
+  name        String
+  description String?        @db.Text
+  createdById Int
+  createdBy   User           @relation("GroupCreator", fields: [createdById], references: [id])
+  societyId   Int
+  society     Society        @relation(fields: [societyId], references: [id])
+  members     GroupMember[]
+  messages    GroupMessage[]
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@index([societyId])
+  @@map("chatgroup")
+}
+
+model GroupMember {
+  id        Int       @id @default(autoincrement())
+  groupId   Int
+  group     ChatGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId    Int
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      String    @default("MEMBER") // ADMIN, MEMBER
+  joinedAt  DateTime  @default(now())
+
+  @@unique([groupId, userId])
+  @@index([userId])
+  @@map("groupmember")
+}
+
+model GroupMessage {
+  id        Int       @id @default(autoincrement())
+  message   String    @db.Text
+  groupId   Int
+  group     ChatGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId    Int
+  user      User      @relation(fields: [userId], references: [id])
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([groupId, createdAt])
+  @@map("groupmessage")
 }

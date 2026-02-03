@@ -684,6 +684,53 @@ class ResidentController {
                     status: 'PENDING'
                 }
             });
+
+            // Notification Logic (Self-excluded)
+            try {
+                const superAdmins = await prisma.user.findMany({
+                    where: { role: 'SUPER_ADMIN' },
+                    select: { id: true }
+                });
+
+                let adminIds = superAdmins.map(a => a.id);
+
+                if (req.user.societyId) {
+                    const societyAdmins = await prisma.user.findMany({
+                        where: {
+                            societyId: req.user.societyId,
+                            role: { in: ['ADMIN', 'COMMITTEE'] }
+                        },
+                        select: { id: true }
+                    });
+                    adminIds = [...adminIds, ...societyAdmins.map(a => a.id)];
+                }
+
+                // Filter out the creator (User/Admin who made the request)
+                adminIds = adminIds.filter(id => id !== req.user.id);
+                // Remove duplicates
+                adminIds = [...new Set(adminIds)];
+
+                if (adminIds.length > 0) {
+                    await prisma.notification.createMany({
+                        data: adminIds.map(id => ({
+                            userId: id,
+                            title: type === "CALLBACK" ? "New Callback Request" : "New Service Booking",
+                            description: `${req.user.name} ${type === "CALLBACK" ? 'requested callback' : 'booked'} for ${serviceName}`,
+                            type: type === "CALLBACK" ? "callback_request" : "service_booking",
+                            metadata: {
+                                inquiryId: inquiry.id,
+                                serviceName,
+                                residentName: req.user.name,
+                                type
+                            }
+                        }))
+                    });
+                }
+            } catch (notifError) {
+                console.error('Notification Error:', notifError);
+                // Don't fail the request if notification fails
+            }
+
             res.json(inquiry);
         } catch (error) {
             res.status(500).json({ error: error.message });

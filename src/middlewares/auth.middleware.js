@@ -32,6 +32,7 @@ const authenticate = async (req, res, next) => {
     // Check if user still exists in DB
     const user = await prisma.user.findUnique({
       where: { id: parseInt(decoded.id) },
+      include: { society: true }
     });
 
     if (!user) {
@@ -50,6 +51,13 @@ const authenticate = async (req, res, next) => {
           error:
             "Your account has been suspended. Please contact your administrator.",
         });
+    }
+
+    // If society is suspended, block access
+    if (user.society && user.society.status === "SUSPENDED") {
+      return res.status(403).json({
+        error: "Your society has been suspended. Access denied.",
+      });
     }
 
     // Always use fresh role/societyId from DB so guard-scoping and role checks are correct
@@ -80,8 +88,9 @@ const optionalAuthenticate = async (req, res, next) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const user = await prisma.user.findUnique({
       where: { id: parseInt(decoded.id) },
+      include: { society: true }
     });
-    if (user && user.status !== "SUSPENDED") {
+    if (user && user.status !== "SUSPENDED" && (!user.society || user.society.status !== "SUSPENDED")) {
       req.user = {
         ...decoded,
         id: user.id,

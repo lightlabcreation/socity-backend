@@ -112,6 +112,8 @@ app.use('/api/invoices', invoiceRoutes);
 app.use('/api/incidents', require('./routes/incident.routes'));
 app.use('/api/patrolling', require('./routes/patrolling.routes'));
 app.use('/api/guard', require('./routes/guard.routes'));
+app.use('/api/advertisements', require('./routes/advertisement.routes'));
+app.use('/api/community', require('./routes/community.routes'));
 
 const fs = require('fs');
 const path = require('path');

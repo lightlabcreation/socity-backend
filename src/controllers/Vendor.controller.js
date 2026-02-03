@@ -4,9 +4,26 @@ class VendorController {
   static async listSocietalVendors(req, res) {
     try {
       const sid = req.user.societyId;
-      const where = sid
-        ? { OR: [{ societyId: sid }, { societyId: null }] }
-        : { societyId: null };
+      const role = req.user.role;
+      
+      let where = {};
+
+      if (role === 'SUPER_ADMIN') {
+          // Super Admin sees ONLY vendors they added (Platform Vendors, societyId = null)
+          // The user said "jo vendor superadmin add kre vo superadmin ko hi dikhne chiye"
+          where = { societyId: null }; 
+      } else {
+          // Admin sees ONLY vendors they added (Society Vendors)
+          // The user said "jo vendor admin add kre vo admin ko hi dikhne chiye"
+          // Originally, Admins could see Platform vendors too. Now we RESTRICT this.
+          if (sid) {
+              where = { societyId: sid };
+          } else {
+              // Fallback for weird case: Admin with no society? Should not happen.
+               where = { societyId: -1 }; // Return empty
+          }
+      }
+
       const vendors = await prisma.vendor.findMany({ where });
       res.json(vendors);
     } catch (error) {
@@ -137,6 +154,18 @@ class VendorController {
       const skip = (page - 1) * limit;
 
       const where = {};
+      const role = req.user.role;
+      const sid = req.user.societyId;
+
+      if (role === 'SUPER_ADMIN') {
+           // Super Admin: ONLY Platform Vendors (societyId = null)
+           where.societyId = null; 
+      } else {
+           // Admin: ONLY Society Vendors (societyId = user.societyId)
+           if (sid) where.societyId = sid;
+           else where.societyId = -1;
+      }
+
       if (search) {
         where.OR = [
             { name: { contains: search } },

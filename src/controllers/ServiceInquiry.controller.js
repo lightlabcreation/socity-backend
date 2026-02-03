@@ -68,17 +68,27 @@ class ServiceInquiryController {
               select: { name: true, pincode: true },
             },
             resident: {
-              select: { name: true },
+              select: { name: true, phone: true, email: true, role: true },
             },
           },
           orderBy: { createdAt: "desc" },
         }),
       ]);
 
-      const withResidentName = inquiries.map((i) => ({
-        ...i,
-        residentName: i.resident?.name ?? i.residentName ?? "—",
-      }));
+      const withResidentName = inquiries.map((i) => {
+        const sanitized = { ...i };
+        // Hide vendorPrice from non-Vendor/non-Admin users
+        if (role !== "VENDOR" && role !== "SUPER_ADMIN" && role !== "ADMIN") {
+             delete sanitized.vendorPrice;
+        }
+        return {
+           ...sanitized,
+           residentName: i.resident?.name ?? i.residentName ?? "—",
+           residentPhone: i.resident?.phone ?? "—",
+           residentEmail: i.resident?.email ?? "—",
+           residentRole: i.resident?.role ?? "—",
+        };
+      });
 
       res.json({
         data: withResidentName,
@@ -267,9 +277,9 @@ class ServiceInquiryController {
       if (inquiry.residentId !== req.user.id) {
         return res.status(403).json({ error: "You can only pay for your own leads" });
       }
-      if ((inquiry.status || "").toUpperCase() !== "CONFIRMED") {
+      if (!["CONFIRMED", "PENDING"].includes((inquiry.status || "").toUpperCase())) {
         return res.status(400).json({
-          error: "Payment is only available when lead status is CONFIRMED",
+          error: "Payment is only available when lead status is PENDING or CONFIRMED",
         });
       }
       if ((inquiry.paymentStatus || "").toUpperCase() === "PAID") {
@@ -294,20 +304,69 @@ class ServiceInquiryController {
         paymentStatus: "PAID", // Force PAID for ALL modes as requested
         paymentDate: new Date(),
         transactionId: method === "CASH" ? `CASH-${Date.now()}` : "TXN-" + Date.now() + "-" + inquiryId,
+        status: "CONFIRMED", // Auto-confirm on payment
       };
 
-      // NOTIFICATION: Notify the vendor (For ALL modes)
+      // 1. Generate Invoice Number
+      const invoiceNo = `INV-SERV-${new Date().getFullYear()}-${Date.now().toString().slice(-6)}`;
+
+      // 2. Create Transaction Record (Accounting)
+      // Only if societyId exists (it might be null for individual, but schema says Transaction needs societyId?)
+      // If Individual user, societyId on inquiry is NULL.
+      // We need to check if we can create a transaction without societyId or if we skip it for Individuals.
+      // Schema: Transaction needs societyId.
+      if (inquiry.societyId) {
+          await prisma.transaction.create({
+              data: {
+                  type: "INCOME",
+                  category: "SERVICE_BOOKING",
+                  amount: payableAmount,
+                  date: new Date(),
+                  description: `Service Payment: ${inquiry.serviceName} - ${inquiry.residentName || 'Resident'}`,
+                  paymentMethod: method === "UPI" ? "UPI" : method === "CASH" ? "CASH" : "ONLINE", // Mapping to enum
+                  status: "PAID",
+                  societyId: inquiry.societyId,
+                  invoiceNo: invoiceNo,
+                  receivedFrom: inquiry.residentName || "Resident",
+              }
+          });
+      }
+
+      // 3. Notify Vendor
       if (inquiry.vendorId) {
         await prisma.notification.create({
           data: {
             userId: inquiry.vendorId,
             title: "Payment Received",
-            description: `Payment of ₹${updateData.payableAmount} received via ${method} for ${inquiry.serviceName} (Unit ${inquiry.unit}). Check "My Leads" for details.`,
+            description: `Payment of ₹${updateData.payableAmount} received via ${method} for ${inquiry.serviceName}.`,
             type: "PAYMENT",
             read: false,
           },
         });
       }
+
+      // 4. Notify SUPER ADMIN(s)
+      const superAdmins = await prisma.user.findMany({
+          where: { role: "SUPER_ADMIN" },
+          select: { id: true }
+      });
+      
+      if (superAdmins.length > 0) {
+          await prisma.notification.createMany({
+              data: superAdmins.map(admin => ({
+                  userId: admin.id,
+                  title: "New Service Payment",
+                  description: `Received ₹${payableAmount} from ${inquiry.residentName} for ${inquiry.serviceName}. Invoice: ${invoiceNo}`,
+                  type: "PAYMENT_RECEIVED",
+                  metadata: {
+                      inquiryId: inquiry.id,
+                      amount: payableAmount,
+                      invoiceNo
+                  }
+              }))
+          });
+      }
+
       const updated = await prisma.serviceInquiry.update({
         where: { id: inquiryId },
         data: updateData,
@@ -317,6 +376,7 @@ class ServiceInquiryController {
         inquiryId: updated.id,
         paymentStatus: updated.paymentStatus,
         transactionId: updated.transactionId ?? null,
+        invoiceNo: invoiceNo,
         message:
           method === "CASH"
             ? "Payment recorded as Cash. Admin will confirm receipt."
@@ -442,6 +502,7 @@ class ServiceInquiryController {
       }
       const vendor = await prisma.vendor.findFirst({
         where: { email: req.user.email },
+        include: { payouts: false } // Avoid fetching unrelated data
       });
       if (!vendor) {
         return res.status(403).json({ error: "Vendor profile not found" });
@@ -457,13 +518,113 @@ class ServiceInquiryController {
           .status(403)
           .json({ error: "You can only update inquiries assigned to you" });
       }
+      const newStatus = String(status || existing.status);
+      
+      // Update the inquiry
+      // Only update payableAmount if the vendor sets it AND it's not already paid/locked? 
+      // ACTUALLY: The requirement is for Vendor to set THEIR price (vendorPrice).
+      // So if req.body.payableAmount is sent, we treat it as vendorPrice.
+      
+      const updateData = { status: newStatus };
+      
+      // If vendor sends an amount during confirmation, save it as vendorPrice
+      if (req.body.payableAmount != null) {
+          updateData.vendorPrice = parseFloat(req.body.payableAmount);
+      }
+
       const inquiry = await prisma.serviceInquiry.update({
         where: { id: parseInt(id) },
-        data: { 
-          status: String(status || existing.status),
-          ...(req.body.payableAmount != null && { payableAmount: parseFloat(req.body.payableAmount) })
-        },
+        data: updateData,
+        include: { society: true }
       });
+
+      // --- AUTO-PAYOUT GENERATION ---
+      const normalizedStatus = newStatus.toUpperCase();
+      const previousStatus = (existing.status || "").toUpperCase();
+
+      // --- AUTO-PAYOUT GENERATION ---
+      // Trigger if status becomes COMPLETED or DONE, and it wasn't already
+      const isCompleted = normalizedStatus === "COMPLETED" || normalizedStatus === "DONE";
+      const wasCompleted = previousStatus === "COMPLETED" || previousStatus === "DONE";
+
+      if (isCompleted && !wasCompleted) {
+          // Use vendorPrice if available (Agreed Vendor Amount), else fallback to payableAmount (User Price)
+          // Default logic: Vendor gets PAID what they quoted (vendorPrice). 
+          // If no vendorPrice, they get user price - commission.
+          
+          let payoutBasis = inquiry.vendorPrice;
+          let commissionPercent = 0; 
+          
+          let payableToVendor = 0;
+          let dealValueForRecord = 0;
+
+          const userPaidTotal = inquiry.payableAmount || 0;
+
+          if (payoutBasis && payoutBasis > 0) {
+              // Case 1: Arbitrage (Vendor Price is Explicit)
+              // User Paid: 1000, Vendor Quote: 800. Commission = 200 (20%).
+              payableToVendor = payoutBasis;
+              dealValueForRecord = userPaidTotal > 0 ? userPaidTotal : payoutBasis;
+
+              if (dealValueForRecord > payableToVendor) {
+                  const commissionAmount = dealValueForRecord - payableToVendor;
+                  commissionPercent = (commissionAmount / dealValueForRecord) * 100;
+                  // Round to 1 decimal place
+                  commissionPercent = Math.round(commissionPercent * 10) / 10;
+              } else {
+                  commissionPercent = 0; // No margin or loss
+              }
+
+          } else {
+              // Fallback to old commission model (Standard 10%)
+              if (userPaidTotal > 0) {
+                  commissionPercent = 10;
+                  const commissionAmount = (userPaidTotal * commissionPercent) / 100;
+                  payableToVendor = userPaidTotal - commissionAmount;
+                  dealValueForRecord = userPaidTotal;
+              }
+          }
+
+          if (payableToVendor > 0) {
+              await prisma.vendorPayout.create({
+                  data: {
+                      vendorId: vendor.id,
+                      vendorName: vendor.name,
+                      societyId: inquiry.societyId,
+                      societyName: inquiry.society?.name || "Individual/Direct",
+                      dealValue: dealValueForRecord,
+                      commissionPercent: commissionPercent,
+                      payableAmount: payableToVendor,
+                      status: 'PENDING',
+                      remarks: `Auto-generated for Service ID #${inquiry.id}: ${inquiry.serviceName} ` + (inquiry.vendorPrice ? '(Agreed Quote)' : '(Commission Based)'),
+                      date: new Date()
+                  }
+              });
+
+              // Notify Super Admin
+               const superAdmins = await prisma.user.findMany({
+                  where: { role: "SUPER_ADMIN" },
+                  select: { id: true }
+              });
+              
+              if (superAdmins.length > 0) {
+                  await prisma.notification.createMany({
+                      data: superAdmins.map(admin => ({
+                          userId: admin.id,
+                          title: "Vendor Payout Generated",
+                          description: `Job Completed by ${vendor.name}. Pending Payout: ₹${payableToVendor}`,
+                          type: "PAYOUT_GENERATED",
+                          metadata: {
+                              vendorId: vendor.id,
+                              amount: payableToVendor,
+                              inquiryId: inquiry.id
+                          }
+                      }))
+                  });
+              }
+          }
+      }
+
       res.json(inquiry);
     } catch (error) {
       console.error("Update Inquiry Status Error:", error);

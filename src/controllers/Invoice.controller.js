@@ -309,6 +309,37 @@ class InvoiceController {
         }
     }
 
+    static async delete(req, res) {
+        try {
+            const { id } = req.params;
+            const numericId = parseInt(id);
+            const societyId = req.user.societyId;
+
+            if (isNaN(numericId)) {
+                return res.status(400).json({ error: 'Invalid invoice ID' });
+            }
+
+            console.log('Deleting Regular Invoice with ID:', id, 'Society:', societyId);
+
+            const invoice = await prisma.invoice.findFirst({
+                where: { id: numericId, societyId }
+            });
+
+            if (!invoice) {
+                return res.status(404).json({ error: 'Invoice not found' });
+            }
+
+            await prisma.invoice.delete({
+                where: { id: numericId }
+            });
+
+            res.json({ message: 'Invoice deleted successfully' });
+        } catch (error) {
+            console.error('Delete Regular Invoice Error:', error);
+            res.status(500).json({ error: error.message });
+        }
+    }
+
     static async getDefaulterStats(req, res) {
         try {
             const societyId = req.user.societyId;

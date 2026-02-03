@@ -8,13 +8,20 @@ class ReportController {
       // 1. Overview Stats (real counts)
       const totalSocieties = await prisma.society.count();
       const activeSocieties = await prisma.society.count({ where: { status: 'ACTIVE' } });
-      const pendingSocieties = await prisma.society.count({ where: { status: 'PENDING' } });
       const totalUsers = await prisma.user.count();
-      const activeUsers = await prisma.user.count({ where: { status: 'ACTIVE' } });
       const totalUnits = await prisma.unit.count();
 
+      // Life-time Total Revenue
+      const lifeTimePaid = await prisma.platformInvoice.aggregate({
+        where: { status: 'PAID' },
+        _sum: { amount: true }
+      });
+      const totalRevenue = Number(lifeTimePaid._sum?.amount ?? 0);
+
       const overview = {
-        activeSocieties: totalSocieties,
+        totalRevenue: `₹${totalRevenue.toLocaleString()}`,
+        revenueChange: '+0%', // Placeholder for now
+        activeSocieties: activeSocieties,
         societiesChange: '+2',
         totalUsers,
         totalUnits,
@@ -40,17 +47,33 @@ class ReportController {
         });
       }
 
-      // 3. Plan Distribution
-      const basicCount = await prisma.society.count({ where: { subscriptionPlan: 'BASIC' } });
-      const proCount = await prisma.society.count({ where: { subscriptionPlan: 'PROFESSIONAL' } });
-      const entCount = await prisma.society.count({ where: { subscriptionPlan: 'ENTERPRISE' } });
+      // 3. Plan Distribution & Revenue
+      const plans = ['BASIC', 'PROFESSIONAL', 'ENTERPRISE'];
+      const revenueByPlan = [];
+      
+      for (const plan of plans) {
+        const societiesInPlan = await prisma.society.findMany({
+          where: { subscriptionPlan: plan },
+          select: { id: true }
+        });
+        const societyIds = societiesInPlan.map(s => s.id);
+        
+        const planRevenue = await prisma.platformInvoice.aggregate({
+          where: {
+            status: 'PAID',
+            societyId: { in: societyIds }
+          },
+          _sum: { amount: true }
+        });
 
-      const totalPlanCount = totalSocieties || 1;
-      const planDistribution = [
-        { plan: 'Enterprise', count: entCount, percentage: Math.round((entCount / totalPlanCount) * 100) },
-        { plan: 'Professional', count: proCount, percentage: Math.round((proCount / totalPlanCount) * 100) },
-        { plan: 'Basic', count: basicCount, percentage: Math.round((basicCount / totalPlanCount) * 100) },
-      ];
+        const amount = Number(planRevenue._sum?.amount ?? 0);
+        revenueByPlan.push({
+          plan: plan === 'BASIC' ? 'Basic' : plan === 'PROFESSIONAL' ? 'Professional' : 'Enterprise',
+          societies: societiesInPlan.length,
+          revenue: `₹${amount.toLocaleString()}`,
+          percentage: totalRevenue > 0 ? Math.round((amount / totalRevenue) * 100) : 0
+        });
+      }
 
       // 4. Monthly revenue from PlatformInvoice (PAID, current month)
       const startOfCurrentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -89,7 +112,7 @@ class ReportController {
         });
       }
 
-      // 6. Recent Societies (real list for dashboard)
+      // 6. Recent Societies
       const recentSocietiesList = await prisma.society.findMany({
         orderBy: { createdAt: 'desc' },
         take: 10,
@@ -104,45 +127,41 @@ class ReportController {
         joinedDate: s.createdAt ? new Date(s.createdAt).toLocaleDateString() : '—'
       }));
 
-      // 7. Society Performance (for reports)
-      const societies = await prisma.society.findMany({
-        include: { _count: { select: { users: true } } },
-        take: 10
+      // 7. Top Performing Societies
+      const topSocietiesList = await prisma.society.findMany({
+        include: { 
+          _count: { select: { users: true } }
+        },
+        take: 5
       });
-      const societyPerformance = societies.map(s => {
-        const usersCount = s._count.users || 0;
-        const engagement = usersCount > 0 ? (70 + (s.id % 20)) : 0;
+
+      const topSocieties = await Promise.all(topSocietiesList.map(async s => {
+        const sRev = await prisma.platformInvoice.aggregate({
+          where: { societyId: s.id, status: 'PAID' },
+          _sum: { amount: true }
+        });
         return {
           name: s.name,
-          users: usersCount,
-          activeUsers: Math.round(usersCount * (engagement / 100)),
-          engagement,
-          trend: 'up',
-          change: '+2%'
+          users: s._count?.users || 0,
+          revenue: `₹${Number(sRev._sum?.amount ?? 0).toLocaleString()}`
         };
-      });
+      }));
 
       res.json({
         overview,
         growthData,
-        planDistribution,
-        societyPerformance,
+        revenueByPlan,
+        topSocieties,
         platformStats: {
           totalSocieties,
           activeSocieties,
-          pendingSocieties,
           totalUsers,
-          activeUsers,
           totalUnits,
           monthlyRevenue,
-          pendingApprovals: pendingSocieties
         },
-        societyGrowthData: growthData.map(d => ({ month: d.month, societies: d.newSocieties })),
         revenueData,
         recentSocieties,
-        subscriptionStats: planDistribution.map(p => ({ plan: p.plan, societies: p.count, color: 'bg-blue-500' })),
-        totalMRR: monthlyRevenue,
-        systemHealth: null
+        totalMRR: monthlyRevenue
       });
     } catch (error) {
       console.error('Platform Stats Error:', error);
