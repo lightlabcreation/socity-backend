@@ -36,6 +36,7 @@ const invoiceRoutes = require('./routes/invoice.routes');
 const moveRequestRoutes = require('./routes/moveRequest.routes');
 const facilityRequestRoutes = require('./routes/facilityRequest.routes');
 const tenantRoutes = require('./routes/tenant.routes');
+const billingConfigRoutes = require('./routes/billing-config.routes');
 
 const http = require('http');
 const { initSocket } = require('./lib/socket');
@@ -114,6 +115,8 @@ app.use('/api/patrolling', require('./routes/patrolling.routes'));
 app.use('/api/guard', require('./routes/guard.routes'));
 app.use('/api/advertisements', require('./routes/advertisement.routes'));
 app.use('/api/community', require('./routes/community.routes'));
+app.use('/api/gates', require('./routes/gate.routes'));
+app.use('/api/billing-config', billingConfigRoutes);
 
 const fs = require('fs');
 const path = require('path');

@@ -97,6 +97,7 @@ model Society {
   expectedUnits    Int              @default(0)
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
+  gates            Gate[]
   createdByUserId  Int?             // Super Admin who created this society – chat allowed only with this society's admins
   createdByUser    User?            @relation("SocietyCreatedBy", fields: [createdByUserId], references: [id])
 
@@ -140,6 +141,9 @@ model Society {
   facilityRequests FacilityRequest[]
   communityChats   CommunityChat[]
   chatGroups       ChatGroup[]
+  maintenanceRules MaintenanceRule[]
+  chargeMaster     ChargeMaster[]
+  lateFeeConfig    LateFeeConfig?
 
   @@map("society")
 }
@@ -436,6 +440,8 @@ model Visitor {
   vehicleNo String?
   purpose   String?
   photo     String?
+  whomToMeet String?
+  fromLocation String?
 
   status    String    @default("PENDING") // PENDING, APPROVED, CHECKED_IN, CHECKED_OUT, REJECTED
   entryTime DateTime?
@@ -455,6 +461,9 @@ model Visitor {
 
   idType   String? // Aadhar, DL
   idNumber String?
+
+  gateId Int?
+  gate   Gate? @relation(fields: [gateId], references: [id])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -514,7 +523,21 @@ model Invoice {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  items InvoiceItem[]
+
   @@map("invoice")
+}
+
+model InvoiceItem {
+  id        Int      @id @default(autoincrement())
+  invoiceId Int
+  invoice   Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  name      String   // Water, Electricity, Cleaning, etc.
+  amount    Float
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("invoiceitem")
 }
 
 model Vendor {
@@ -1553,3 +1576,66 @@ model GroupMessage {
   @@index([groupId, createdAt])
   @@map("groupmessage")
 }
+
+model Gate {
+  id        Int      @id @default(autoincrement())
+  name      String
+  isActive  Boolean  @default(true)
+  
+  societyId Int
+  society   Society  @relation(fields: [societyId], references: [id])
+  
+  visitors  Visitor[]
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("gate")
+}
+
+model MaintenanceRule {
+  id              Int      @id @default(autoincrement())
+  societyId       Int
+  society         Society  @relation(fields: [societyId], references: [id])
+  unitType        String   // e.g. "2BHK", "3BHK", "ALL"
+  calculationType String   @default("FLAT") // FLAT | AREA
+  amount          Float    @default(0)
+  ratePerSqFt     Float    @default(0)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([societyId, unitType])
+  @@map("maintenancerule")
+}
+
+model ChargeMaster {
+  id                Int      @id @default(autoincrement())
+  societyId         Int
+  society           Society  @relation(fields: [societyId], references: [id])
+  name              String
+  defaultAmount     Float    @default(0)
+  calculationMethod String   @default("FIXED") // FIXED | VARIABLE
+  isOptional        Boolean  @default(false)
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@map("chargemaster")
+}
+
+model LateFeeConfig {
+  id          Int      @id @default(autoincrement())
+  societyId   Int      @unique
+  society     Society  @relation(fields: [societyId], references: [id])
+  gracePeriod Int      @default(5)    // days
+  feeType     String   @default("FIXED") // FIXED | PERCENTAGE | PER_DAY
+  amount      Float    @default(0)
+  maxCap      Float?
+  isActive    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("latefeeconfigmodel")
+}
+

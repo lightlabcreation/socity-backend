@@ -1,5 +1,6 @@
 const prisma = require('../lib/prisma');
 const cloudinary = require('../config/cloudinary');
+const { getIO } = require('../lib/socket');
 
 class VisitorController {
   static async list(req, res) {
@@ -312,6 +313,18 @@ class VisitorController {
         where: { id: parseInt(id) },
         data: updateData
       });
+
+      // Emit socket notification to the visitor-entry page
+      try {
+        const io = getIO();
+        io.to(`user_visitor_${id}`).emit('visitor_status_updated', {
+          id: visitor.id,
+          status: visitor.status
+        });
+      } catch (ioErr) {
+        console.error('Visitor status socket emission failed:', ioErr);
+      }
+
       res.json(visitor);
     } catch (error) {
       res.status(500).json({ error: error.message });
